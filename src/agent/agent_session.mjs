@@ -317,7 +317,7 @@ export class AgentSession {
           content: ''
         });
         const output = await this.gateway.invoke({
-          phase: 'agent_turn', modelId: this.config.roles.main ?? this.config.roles.chair,
+          phase: 'agent_turn', modelId: this.config.roles.main,
           messages, generation: generationFor(this.config, 'agent_turn'),
           context: { turn: this.state.current_turn, iteration, agent_mode: agentMode },
           tools: agentTools,
@@ -532,7 +532,7 @@ export class AgentSession {
       }
       return await this.gateway.invoke({
         phase: 'varina_gate',
-        modelId: this.config.roles.varina_gate ?? this.config.roles.dealer ?? this.config.roles.main ?? this.config.roles.chair,
+        modelId: this.config.roles.varina_gate ?? this.config.roles.main,
         messages: [
           { role: 'system', content: VARINA_GATE_SYSTEM_PROMPT },
           { role: 'user', content: JSON.stringify({ original_user_request: originalUserRequest, baseline_answer: baselineAnswer }) }
@@ -560,7 +560,7 @@ export class AgentSession {
     };
     const extraction = await this.gateway.invoke({
       phase: 'baseline_extraction',
-      modelId: this.config.roles.baseline_extraction ?? this.config.roles.dedup ?? this.config.roles.main ?? this.config.roles.chair,
+      modelId: this.config.roles.baseline_extraction ?? this.config.roles.main,
       messages: [
         { role: 'system', content: BASELINE_EXTRACTION_SYSTEM_PROMPT },
         { role: 'user', content: JSON.stringify({ original_user_request: originalUserRequest, baseline_answer: baselineAnswer }) }
@@ -624,7 +624,7 @@ export class AgentSession {
     );
     const rendered = await this.gateway.invoke({
       phase: 'varina_delta',
-      modelId: this.config.roles.varina_delta ?? this.config.roles.assembly ?? this.config.roles.chair ?? this.config.roles.main,
+      modelId: this.config.roles.varina_delta ?? this.config.roles.main,
       messages: [
         { role: 'system', content: VARINA_DELTA_SYSTEM_PROMPT },
         { role: 'user', content: JSON.stringify({

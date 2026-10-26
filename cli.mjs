@@ -5,6 +5,9 @@ import { stdin as input, stdout as output } from 'node:process';
 import { AgentService } from './src/agent/agent_service.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
+if (typeof process.loadEnvFile === 'function') {
+  try { process.loadEnvFile(path.join(root, '.env')); } catch {}
+}
 
 function valueAfter(flag) {
   const index = process.argv.indexOf(flag);

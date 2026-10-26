@@ -344,16 +344,13 @@ export class ModelGateway {
 export function generationFor(config, phase) {
   const fallback = { temperature: 0.2, reasoning_effort: 'low', max_output_tokens: 8192 };
   if (!config?.generation) return fallback;
-  if (phase === 'agent_turn' || phase === 'varina_react') return config.generation.agent ?? config.generation.chair ?? fallback;
-  if (phase === 'varina_gate') return config.generation.varina_gate ?? config.generation.decision ?? { temperature: 0, reasoning_effort: 'low', max_output_tokens: 512 };
+  if (phase === 'agent_turn' || phase === 'varina_react') return config.generation.agent ?? fallback;
+  if (phase === 'varina_gate') return config.generation.varina_gate ?? { temperature: 0, reasoning_effort: 'low', max_output_tokens: 512 };
   if (phase === 'baseline_extraction') return config.generation.baseline_extraction ?? { temperature: 0, reasoning_effort: 'low', max_output_tokens: 8192 };
-  if (phase === 'varina_delta') return config.generation.varina_delta ?? config.generation.chair ?? { temperature: 0.2, reasoning_effort: 'low', max_output_tokens: 4096 };
+  if (phase === 'varina_delta') return config.generation.varina_delta ?? { temperature: 0.2, reasoning_effort: 'low', max_output_tokens: 4096 };
   if (phase === 'varina_decomposition_seat') return config.generation.decomposition ?? config.generation.creative ?? fallback;
   if (phase === 'varina_subproblem_answer') return config.generation.subproblemExpansion ?? config.generation.creative ?? fallback;
   if (phase === 'varina_seat' || phase === 'aha_seat') return config.generation.creative ?? fallback;
-  if (phase === 'varina_grounder' || phase === 'aha_grounder') return config.generation.grounder ?? config.generation.dedup ?? fallback;
-  if (phase === 'varina_dedup' || phase === 'aha_dedup') return config.generation.dedup ?? fallback;
-  if (phase === 'varina_assembly' || phase === 'aha_assembly') return config.generation.assembly ?? config.generation.chair ?? fallback;
   if (phase === 'compaction') return config.generation.compaction ?? { temperature: 0.1, reasoning_effort: 'low', max_output_tokens: 2048 };
   return fallback;
 }

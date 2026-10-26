@@ -287,7 +287,7 @@ export class ExplorationReact {
     this.runtime.react.interventions.push({ iteration: this.runtime.react.iteration, round: this.runtime.round_records.length + 1, call_id: id });
     this.runtime.react.messages.push({ role: 'user', content: '程序干预：指定发散轮次尚未完成。执行一轮补充发散后，请继续核查增量并完善回答。' });
     const call = { id, name: 'Diverge', arguments_json: JSON.stringify({ focus: '继续探索尚未覆盖的机制、反例和边界' }) };
-    const modelId = this.config.roles.exploration ?? this.config.roles.main ?? this.config.roles.chair;
+    const modelId = this.config.roles.exploration ?? this.config.roles.main;
     const native = this.config.models?.find(model => model.id === modelId)?.protocol === 'gemini';
     this.runtime.react.messages.push({ role: 'assistant', content: null,
       ...(native ? { native_parts: [{ functionCall: { id, name: call.name, args: JSON.parse(call.arguments_json) }, thoughtSignature: 'skip_thought_signature_validator' }] } : {}),
@@ -299,7 +299,7 @@ export class ExplorationReact {
   async run() {
     const runtime = this.runtime;
     const maxSteps = this.config.exploration?.maxReactSteps ?? this.config.max_tool_iterations ?? 100;
-    const modelId = this.config.roles.exploration ?? this.config.roles.main ?? this.config.roles.chair;
+    const modelId = this.config.roles.exploration ?? this.config.roles.main;
     const model = this.config.models?.find(item => item.id === modelId);
     const keepReasoning = model?.preserveReasoningContent === true || /deepseek/i.test(`${model?.id ?? ''} ${model?.model ?? ''}`);
     const modelChars = model?.contextWindowTokens ? Math.max(1000, Math.floor((model.contextWindowTokens - (generationFor(this.config, 'varina_react').max_output_tokens ?? 8192)) * 2.5)) : Infinity;

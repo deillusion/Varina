@@ -53,9 +53,7 @@ const VARINA_DESIGN_TOOL = {
       problem: { type: 'string', description: '核心机制或架构困境，最多 4000 字符' },
       constraints: { type: 'array', items: { type: 'string' }, description: '最多 20 条硬约束' },
       context_summary: { type: 'string', description: '已核查背景摘要，最多 3000 字符；不要粘贴源码' },
-      experiment: { type: 'string', enum: ['single', 'treatment'], description: '兼容字段；新引擎固定最多五轮并支持早停' },
-      mode: { type: 'string', enum: ['live', 'mock'], default: 'live' },
-      use_domain_operators: { type: 'boolean', description: '兼容字段；新引擎使用版本化算子库' }
+      mode: { type: 'string', enum: ['live', 'mock'], default: 'live' }
     },
     required: ['problem']
   }
@@ -155,8 +153,8 @@ function handleMessage(message) {
   return sendError(id, -32601, `Method not found: ${method}`);
 }
 
-export async function startMcpServer() {
-  agentService = new AgentService({ root, workspaceRoot });
+export async function startMcpServer({ dataDir } = {}) {
+  agentService = new AgentService({ root, workspaceRoot, dataDir });
   await agentService.init();
   const lines = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
   lines.on('close', () => { void agentService.stop(); });

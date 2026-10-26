@@ -244,7 +244,7 @@ export async function compactSessionHistory({
     { role: 'user', content: compactionInput }
   ];
 
-  const modelId = config.roles?.compaction ?? config.roles?.main ?? config.roles?.chair;
+  const modelId = config.roles?.compaction ?? config.roles?.main;
   const result = await gateway.invoke({
     phase: 'compaction',
     modelId,

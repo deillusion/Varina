@@ -1,6 +1,7 @@
 import { loadConfig } from '../src/config.mjs';
 import { chatCompletion } from '../src/provider.mjs';
-import { validateSchema, schemas } from '../src/schema.mjs';
+import { validateJsonSchema } from '../src/agent/schemas.mjs';
+import { generationFor } from '../src/agent/model_gateway.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,14 +13,15 @@ if (process.argv.includes('--gemini-ai-studio')) {
   model.protocol = 'chat'; model.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai';
 }
 const results = [];
+const probeSchema = { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false };
 await Promise.allSettled(config.models.filter(m => !selected.length || selected.includes(m.id)).map(async model => {
-  for (const phase of ['creative', 'decision']) {
+  for (const phase of ['agent_turn', 'connectivity']) {
     const started = Date.now();
-    const request = { phase, seed: 42, generation: { ...config.generation[phase], reasoning_effort: 'low', ...(process.argv.includes('--configured-limits') ? {} : { max_output_tokens: 2048 }) }, messages: [{ role: 'system', content: '你正在接受接口连通测试。请简短作答。' }, { role: 'user', content: phase === 'creative' ? '只输出：连接成功' : '返回 JSON 对象：text 为“连接成功”，cited_point_ids 为空数组。' }] };
+    const request = { phase, seed: 42, ...(phase === 'connectivity' ? { schema: probeSchema } : {}), generation: { ...generationFor(config, 'agent_turn'), reasoning_effort: 'low', ...(process.argv.includes('--configured-limits') ? {} : { max_output_tokens: 2048 }) }, messages: [{ role: 'system', content: '你正在接受接口连通测试。请简短作答。' }, { role: 'user', content: phase === 'agent_turn' ? '只输出：连接成功' : '返回 JSON 对象：text 为“连接成功”。' }] };
     const record = { model_id: model.id, model: model.model, base_url: model.baseUrl, phase, started_at: new Date(started).toISOString() };
     try {
       const result = await chatCompletion(model, request, { timeoutMs: 60000 });
-      if (phase === 'decision') validateSchema(JSON.parse(result.text), schemas.decision);
+      if (phase === 'connectivity') validateJsonSchema(JSON.parse(result.text), probeSchema);
       Object.assign(record, { status: 'passed', latency_ms: Date.now() - started, usage: result.usage, resolved_model: result.resolved_model, text: result.text });
     } catch (e) { Object.assign(record, { status: 'failed', latency_ms: Date.now() - started, error: e.message, usage: e.result?.usage ?? null }); }
     results.push(record); console.log(JSON.stringify(record));

@@ -7,12 +7,9 @@
   "engines": { "node": ">=22" },
   "scripts": {
     "start": "node --env-file-if-exists=.env server.mjs",
-    "test": "node --test tests/*.test.mjs",
-    "test:in-process": "node --test --test-reporter=spec tests/all.mjs",
-    "test:replay": "node scripts/replay-run-failures.mjs",
+    "test": "node --test test/*.test.mjs",
     "demo": "node cli.mjs --demo",
     "run": "node --env-file-if-exists=.env cli.mjs",
-    "mcp": "node --env-file-if-exists=.env mcp.mjs",
-    "mcp:ui": "node --env-file-if-exists=.env mcp_ui.mjs"
+    "mcp": "node --env-file-if-exists=.env mcp.mjs"
   }
 }

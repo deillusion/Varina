@@ -12,7 +12,7 @@
 - 把本系统作为 MCP 工具接入 Claude Code / Cursor 等客户端的使用者
 
 **What it is not:**
-- 不是固定问题、顺序多轮、Chair 唯一裁决的僵化 Workflow（旧 engine/RunService 仅为兼容与历史读取路径）
+- 不是固定问题、顺序多轮、Chair 唯一裁决的僵化 Workflow（旧 engine/RunService 已移除）
 - ExploreDesign 不是主 Agent 在 ReAct 中调用的工具，而是常规回答完成后的增量探索阶段
 - 候选方案不评分、不排名、不选唯一赢家；探索终稿由同一 ReAct Agent 生成，不依赖固定 Assembly 阶段
 - 不是带 Git 依赖或第三方 npm 运行时的工程
@@ -52,7 +52,7 @@
 - Do not confuse with: 探索 ReAct Agent 或前序子问题拆解与回答席位；Jev 同时负责子问题与发散观点判重。
 
 ### 探索 ReAct Agent
-- Definition: 使用 roles.exploration，未配置时回退到 roles.main / roles.chair 的独立有界工具循环；固定初始消息包含原始请求、约束、假设、项目背景与初始观点板，后续通过工具结果接收观点和事实变化。
+- Definition: 使用 roles.exploration，未配置时回退到 roles.main 的独立有界工具循环；固定初始消息包含原始请求、约束、假设、项目背景与初始观点板，后续通过工具结果接收观点和事实变化。
 - Ecosystem role: 自主决定资料调查、发散与观点修订顺序，并生成终稿；只提供读取与探索工具，不允许修改项目文件。
 - Do not confuse with: 普通聊天 Agent 或旧的固定 Grounder / Assembly 调用流程。
 
@@ -119,6 +119,6 @@
 - `src/agent/project_manifest.mjs`: VARINA.md 的 manifest 规范化与 Markdown 渲染事实实现（字段长度与条目数约束）。
 
 ### Unresolved Source Conflicts
-- Web 模型配置面板仍展示 Grounder / Assembly，当前探索主流程已不调用这两个固定阶段；roles.exploration 已在代码中支持，但面板尚无对应选择控件。
-- tests/ 在本地存在，但被 .gitignore 排除；本地测试可用性不等于 Git 提交包含测试覆盖。
+- Web 模型配置面板展示当前 Agent 的角色；旧 workflow 的角色选择只在配置加载边界映射。
+- 可提交的回归测试位于 test/；被 .gitignore 排除的历史 tests/ 目录不再作为测试入口。
 - Aha 内部标识与 Varina 命名并存；MCP aha_* 工具名作为兼容别名保留，不代表另一套主流程。

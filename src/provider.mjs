@@ -1,8 +1,7 @@
-import { schemas } from './schema.mjs';
 import { postJSON } from './transport.mjs';
 import { getModelApiKey } from './config.mjs';
 export function buildPayload(model, request) {
-  const responseSchema = request.schema ?? schemas[request.phase];
+  const responseSchema = request.schema;
   const generation = request.generation ?? {};
   const effectiveOutputLimit = Math.min(generation.max_output_tokens ?? 8192, model.maxOutputTokens ?? Infinity);
   if (model.protocol === 'gemini') {

@@ -1,8 +1,6 @@
 import { loadConfig, saveConfig, getModelApiKey, isModelAvailable, resolveActiveConfig } from '../config.mjs';
 import { chatCompletion } from '../provider.mjs';
 import { operators } from '../operators.mjs';
-import { domainCatalog } from '../domain_operators.mjs';
-import { EXPERIMENTS } from './experiment_catalog.mjs';
 import { getJevApiKey } from '../decision/jev_gateway.mjs';
 
 function sanitizedConfig(config) {
@@ -59,9 +57,7 @@ export class ConfigService {
       rawConfigPresent: !!liveConfig,
       liveError,
       routingPreview,
-      experiments: EXPERIMENTS,
       operators,
-      domainCatalog,
       ...extra
     };
   }
@@ -100,7 +96,8 @@ export class ConfigService {
     const started = Date.now();
     try {
       const result = await chatCompletion(model, {
-        phase: 'direct',
+        phase: 'connectivity',
+        schema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
         messages: [{ role: 'user', content: '严格返回 JSON: {"text":"ok"}' }],
         generation: { max_output_tokens: 64, temperature: 0.1, reasoning_effort: 'low' },
         seed: 1

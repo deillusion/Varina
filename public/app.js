@@ -110,7 +110,7 @@ function updateComposerModel() {
     labelEl.textContent = '配置模型…';
     return;
   }
-  const mainRoleModelId = cfg.roles?.main ?? cfg.roles?.chair;
+  const mainRoleModelId = cfg.roles?.main;
   const modelObj = cfg.models?.find(m => m.id === mainRoleModelId) || cfg.models?.[0];
   if (modelObj) {
     const pName = modelObj.providerName || modelObj.id.split('_')[0];
@@ -2193,11 +2193,11 @@ function renderModelsTabContent(c, models, currentMain) {
 
 function renderVaryTabContent(c, models, currentMain) {
   const roleNames = [
-    ['chair', '主席整理 (Chair)', '负责每轮发言汇总与核心架构决策'],
-    ['dedup', '观点结晶 (Dedup)', '负责跨席位观点去重、合并与结晶'],
-    ['dealer', '荷官发牌 (Dealer)', '负责认知算子抽取与多视角发牌刺激'],
-    ['grounder', '事实核验 (Grounder)', '负责结合工作区代码与资料进行真实性校验'],
-    ['assembly', '机制装配 (Assembly)', '负责从原子观点中装配正交机制方案']
+    ['exploration', '深度探索', '读取资料、发散和核查观点，并形成候选方案'],
+    ['varina_gate', '探索启动判断', '未使用 Jev 时判断请求是否需要探索确认'],
+    ['baseline_extraction', '回答提取', '将常规回答整理为探索的初始观点'],
+    ['varina_delta', '终稿整合', '综合常规回答与探索结果，重新回答原始问题'],
+    ['compaction', '上下文整理', '在对话过长时整理并保留必要背景']
   ];
 
   const roleAssignHtml = roleNames.map(([key, label, desc]) => {
@@ -2226,8 +2226,8 @@ function renderVaryTabContent(c, models, currentMain) {
   return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
       <div>
-        <h3 style="margin:0;font-size:14px;color:var(--ink)">Vary 多视角推演调度规则</h3>
-        <p style="margin:3px 0 0;font-size:11.5px;color:var(--muted)">分配 5 大核心功能角色与 8 席位深度推演模型。</p>
+        <h3 style="margin:0;font-size:14px;color:var(--ink)">Varina 多视角推演设置</h3>
+        <p style="margin:3px 0 0;font-size:11.5px;color:var(--muted)">选择探索各阶段与 ${c.seats?.length ?? 0} 个发散席位使用的模型。</p>
       </div>
       <button type="button" class="ghost-action-btn" id="cfg-sync-all-seats">一键同步席位为主模型</button>
     </div>
@@ -2240,7 +2240,7 @@ function renderVaryTabContent(c, models, currentMain) {
     </div>
 
     <div class="settings-section" style="margin-top:10px">
-      <div class="settings-section-title">Varina 8 席位推演分配</div>
+      <div class="settings-section-title">Varina 发散席位分配</div>
       <div class="role-assign-grid">
         ${seatsHtml}
       </div>
@@ -2269,7 +2269,7 @@ function renderSettingsModalContent() {
 
   const c = state.editingConfig;
   const models = c.models || [];
-  const currentMain = c.roles?.main || c.roles?.chair || models[0]?.id || '';
+  const currentMain = c.roles?.main || models[0]?.id || '';
 
   if (tab === 'general') {
     container.innerHTML = renderGeneralTabContent();
@@ -2289,7 +2289,7 @@ async function openSettingsModal() {
     state.editingConfig = structuredClone(live);
     if (!state.editingConfig.roles) state.editingConfig.roles = {};
     if (!state.editingConfig.roles.main) {
-      state.editingConfig.roles.main = state.editingConfig.roles.chair || state.editingConfig.models?.[0]?.id || '';
+      state.editingConfig.roles.main = state.editingConfig.models?.[0]?.id || '';
     }
     state.editingProviderId = null;
     state.isAddingProvider = false;
@@ -2778,7 +2778,7 @@ $('#settings-body')?.addEventListener('click', event => {
   const syncSeatsBtn = event.target.closest('#cfg-sync-all-seats');
   if (syncSeatsBtn) {
     syncFieldsToState();
-    const mainRoleModelId = state.editingConfig?.roles?.main || state.editingConfig?.roles?.chair || state.editingConfig?.models?.[0]?.id;
+    const mainRoleModelId = state.editingConfig?.roles?.main || state.editingConfig?.models?.[0]?.id;
     if (mainRoleModelId) {
       (state.editingConfig.seats || []).forEach(seat => {
         seat.modelId = mainRoleModelId;

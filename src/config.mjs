@@ -2,6 +2,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { assert } from './schema.mjs';
 import { DEFAULT_JEV_CONFIG } from './decision/jev_gateway.mjs';
 
+const MODEL_ROLES = ['main', 'exploration', 'varina_gate', 'baseline_extraction', 'varina_delta', 'compaction'];
+
 const DEFAULT_DECOMPOSITION_CONFIG = Object.freeze({
   enabled: true,
   seatCount: 5,
@@ -15,6 +17,37 @@ const DEFAULT_SUBPROBLEM_EXPANSION_CONFIG = Object.freeze({
   answersPerSubproblem: 2,
   maxElementsPerAnswer: 3
 });
+
+// Translate old model selections at the configuration boundary; runtime code only uses Agent roles.
+export function normalizeConfig(input) {
+  const config = structuredClone(input);
+  const oldRoles = config.roles ?? {};
+  const main = oldRoles.main ?? oldRoles.chair ?? config.seats?.[0]?.modelId ?? config.models?.[0]?.id;
+  config.roles = {
+    main,
+    exploration: oldRoles.exploration ?? main,
+    varina_gate: oldRoles.varina_gate ?? oldRoles.dealer ?? main,
+    baseline_extraction: oldRoles.baseline_extraction ?? oldRoles.dedup ?? main,
+    varina_delta: oldRoles.varina_delta ?? oldRoles.assembly ?? oldRoles.chair ?? main,
+    compaction: oldRoles.compaction ?? main
+  };
+  const generation = config.generation ?? {};
+  config.generation = {
+    ...generation,
+    agent: structuredClone(generation.agent ?? generation.chair ?? { max_output_tokens: 8192, temperature: 0.3, reasoning_effort: 'low' }),
+    creative: generation.creative ?? { max_output_tokens: 8192, temperature: 0.2, reasoning_effort: 'low' },
+    varina_gate: generation.varina_gate ?? generation.decision ?? { max_output_tokens: 512, temperature: 0, reasoning_effort: 'low' },
+    varina_delta: structuredClone(generation.varina_delta ?? generation.chair ?? { max_output_tokens: 4096, temperature: 0.2, reasoning_effort: 'low' })
+  };
+  for (const key of ['extractor', 'chair', 'dedup', 'dealer', 'decision', 'grounder', 'assembly']) delete config.generation[key];
+  for (const key of ['minimumCreativeRatio', 'minimumDecisionRatio', 'default_max_mechanisms']) delete config[key];
+  config.decisionProviders ??= {};
+  config.decisionProviders.jev = { ...DEFAULT_JEV_CONFIG, ...(config.decisionProviders.jev ?? {}) };
+  config.decomposition = { ...DEFAULT_DECOMPOSITION_CONFIG, ...(config.decomposition ?? {}) };
+  config.subproblemExpansion = { ...DEFAULT_SUBPROBLEM_EXPANSION_CONFIG, ...(config.subproblemExpansion ?? {}) };
+  config.exploration = { rounds: 5, maxReactSteps: 100, maxContextChars: 1000000, ...(config.exploration ?? {}) };
+  return config;
+}
 
 export function getModelApiKey(model) {
   if (model?.apiKey && typeof model.apiKey === 'string' && model.apiKey.trim()) {
@@ -64,8 +97,8 @@ export function resolveActiveConfig(config, mode = 'live') {
   const remappedRoles = {};
 
   // 1. Role Fallback:
-  const preferredFallbackRoleModel = activeIds.has(config.roles?.chair) ? config.roles.chair : activeModels[0].id;
-  for (const roleKey of ['chair', 'dedup', 'dealer', 'main', 'grounder', 'assembly', 'exploration']) {
+  const preferredFallbackRoleModel = activeIds.has(config.roles?.main) ? config.roles.main : activeModels[0].id;
+  for (const roleKey of MODEL_ROLES) {
     const currentModelId = resolved.roles?.[roleKey];
     if (currentModelId && !activeIds.has(currentModelId)) {
       resolved.roles[roleKey] = preferredFallbackRoleModel;
@@ -113,6 +146,7 @@ export function resolveActiveConfig(config, mode = 'live') {
 }
 
 export async function saveConfig(root, newConfig) {
+  newConfig = normalizeConfig(newConfig);
   let existing = null;
   try {
     existing = JSON.parse(await readFile(`${root}/config.local.json`, 'utf8'));
@@ -146,7 +180,7 @@ export async function saveConfig(root, newConfig) {
       }
     }
     if (newConfig.roles) {
-      for (const roleKey of ['chair', 'dedup', 'dealer', 'main', 'grounder', 'assembly']) {
+      for (const roleKey of MODEL_ROLES) {
         if (!validModelIds.has(newConfig.roles[roleKey])) {
           newConfig.roles[roleKey] = fallbackModelId;
         }
@@ -176,39 +210,7 @@ export async function loadConfig(root, mode = 'mock', { allowKeyless = false } =
       }
     }
   }
-  // Accept older config files, but do not expose or freeze the retired stage.
-  if (config.roles) {
-    delete config.roles.extractor;
-    if (!config.roles.dealer) config.roles.dealer = config.roles.chair || config.seats[0]?.modelId;
-    if (!config.roles.main) config.roles.main = config.roles.chair || config.seats[0]?.modelId;
-    if (!config.roles.grounder) config.roles.grounder = config.roles.dedup || config.roles.main;
-    if (!config.roles.assembly) config.roles.assembly = config.roles.chair || config.roles.main;
-  }
-  if (config.generation) {
-    delete config.generation.extractor;
-    if (!config.generation.dealer) config.generation.dealer = structuredClone(config.generation.chair || config.generation.creative || { max_output_tokens: 1024, temperature: 0.2 });
-    if (!config.generation.agent) config.generation.agent = structuredClone(config.generation.chair || { max_output_tokens: 8192, temperature: 0.3, reasoning_effort: 'low' });
-    if (!config.generation.grounder) config.generation.grounder = structuredClone(config.generation.dedup || { max_output_tokens: 16384, temperature: 0.1, reasoning_effort: 'low' });
-    if (!config.generation.assembly) config.generation.assembly = structuredClone(config.generation.chair || { max_output_tokens: 8192, temperature: 0.3, reasoning_effort: 'low' });
-    if (config.generation.dedup && config.generation.dedup.reasoning_effort === 'low') {
-      config.generation.dedup.reasoning_effort = 'none';
-      config.generation.dedup.thinking ??= 'disabled';
-    }
-  }
-  config.decisionProviders ??= {};
-  config.decisionProviders.jev = {
-    ...DEFAULT_JEV_CONFIG,
-    ...(config.decisionProviders.jev ?? {})
-  };
-  config.decomposition = {
-    ...DEFAULT_DECOMPOSITION_CONFIG,
-    ...(config.decomposition ?? {})
-  };
-  config.subproblemExpansion = {
-    ...DEFAULT_SUBPROBLEM_EXPANSION_CONFIG,
-    ...(config.subproblemExpansion ?? {})
-  };
-  config.exploration = { rounds: 5, maxReactSteps: 100, maxContextChars: 1000000, ...(config.exploration ?? {}) };
+  config = normalizeConfig(config);
   validateConfig(config, mode, { allowKeyless });
   return config;
 }
@@ -223,25 +225,13 @@ export function validateConfig(c, mode, { allowKeyless = false } = {}) {
   const ids = c.models.map(m => m.id);
   assert(new Set(ids).size === ids.length && new Set(c.seats.map(s => s.id)).size === c.seats.length, '模型或席位 ID 重复');
   for (const s of c.seats) assert(/^[A-Za-z0-9_-]+$/.test(s.id) && ids.includes(s.modelId), '席位模型引用错误');
-  for (const role of ['dedup', 'chair']) assert(ids.includes(c.roles?.[role]), `缺少 ${role} 模型`);
-  if (c.roles?.dealer) assert(ids.includes(c.roles.dealer), '缺少 dealer 模型');
-  for (const role of ['main', 'grounder', 'assembly', 'exploration']) if (c.roles?.[role]) assert(ids.includes(c.roles[role]), `缺少 ${role} 模型`);
-  for (const phase of ['creative', 'dedup', 'decision', 'chair']) {
-    const g = c.generation?.[phase];
+  assert(ids.includes(c.roles?.main), '缺少 main 模型');
+  for (const role of MODEL_ROLES) if (c.roles?.[role] != null) assert(ids.includes(c.roles[role]), `缺少 ${role} 模型`);
+  for (const phase of ['agent', 'creative']) assert(c.generation?.[phase], `缺少 ${phase} 生成参数`);
+  for (const [phase, g] of Object.entries(c.generation ?? {})) {
     assert(g && Number.isInteger(g.max_output_tokens) && g.max_output_tokens > 0, `${phase} token 上限错误`);
     assert(Number.isFinite(g.temperature) && g.temperature >= 0 && g.temperature <= 2, `${phase} temperature 错误`);
     assert(g.thinking == null || ['enabled', 'disabled'].includes(g.thinking), `${phase} thinking 必须是 enabled 或 disabled`);
-  }
-  if (c.generation?.dealer) {
-    const g = c.generation.dealer;
-    assert(Number.isInteger(g.max_output_tokens) && g.max_output_tokens > 0, 'dealer token 上限错误');
-    assert(Number.isFinite(g.temperature) && g.temperature >= 0 && g.temperature <= 2, 'dealer temperature 错误');
-  }
-  for (const phase of ['agent', 'grounder', 'assembly']) {
-    if (!c.generation?.[phase]) continue;
-    const g = c.generation[phase];
-    assert(Number.isInteger(g.max_output_tokens) && g.max_output_tokens > 0, `${phase} token 上限错误`);
-    assert(Number.isFinite(g.temperature) && g.temperature >= 0 && g.temperature <= 2, `${phase} temperature 错误`);
   }
 
   assert(c.retries == null || (Number.isInteger(c.retries) && c.retries >= 0 && c.retries <= 2), '重试次数须为0–2');
@@ -249,7 +239,6 @@ export function validateConfig(c, mode, { allowKeyless = false } = {}) {
   assert(c.agent?.max_tool_iterations == null || (Number.isInteger(c.agent.max_tool_iterations) && c.agent.max_tool_iterations >= 1), 'agent.max_tool_iterations 须为正整数');
   assert(Number.isFinite(c.timeoutMs) && c.timeoutMs >= 100, 'timeoutMs 无效');
   assert(c.retryDelayMs == null || (Number.isFinite(c.retryDelayMs) && c.retryDelayMs >= 0), 'retryDelayMs 无效');
-  for (const k of ['minimumCreativeRatio', 'minimumDecisionRatio']) assert(c[k] > 0 && c[k] <= 1, `${k} 须大于0且不超过1`);
   const jev = c.decisionProviders?.jev;
   if (jev) {
     assert(typeof jev.enabled === 'boolean', 'decisionProviders.jev.enabled must be boolean');

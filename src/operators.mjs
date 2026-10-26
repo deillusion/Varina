@@ -222,13 +222,11 @@ export function random(seed) {
   let x = seed >>> 0;
   return () => { x += 0x6D2B79F5; let t = Math.imul(x ^ x >>> 15, 1 | x); t ^= t + Math.imul(t ^ t >>> 7, 61 | t); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 }
-export function sampleMixedOperators(rng, genericPool = operators, domainOperators = []) {
-  const genericEnabled = genericPool.filter(o => o.enabled);
+export function sampleOperators(rng, pool = operators) {
+  const genericEnabled = pool.filter(o => o.enabled);
   const genericFamilies = [...new Set(genericEnabled.map(o => o.family))].sort();
-  const domainEnabled = domainOperators.filter(o => o.enabled !== false);
-  if (genericFamilies.length < (domainEnabled.length ? 2 : 3)) throw new Error('可用通用算子族不足');
+  if (genericFamilies.length < 3) throw new Error('可用通用算子族不足');
   const picked = [];
-  if (domainEnabled.length) picked.push(domainEnabled[Math.floor(rng() * domainEnabled.length)]);
   const availableFamilies = [...genericFamilies];
   while (picked.length < 3) {
     const family = availableFamilies.splice(Math.floor(rng() * availableFamilies.length), 1)[0];
@@ -236,8 +234,4 @@ export function sampleMixedOperators(rng, genericPool = operators, domainOperato
     picked.push(choices[Math.floor(rng() * choices.length)]);
   }
   return picked;
-}
-
-export function sampleOperators(rng, pool = operators) {
-  return sampleMixedOperators(rng, pool, []);
 }

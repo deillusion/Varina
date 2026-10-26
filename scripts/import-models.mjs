@@ -21,7 +21,7 @@ config.models = pairs.map(({ model, key }) => {
 });
 if (new Set(config.models.map(m => m.id)).size !== 3) throw new Error('需要 DeepSeek、GLM、Gemini 各一个模型');
 config.seats = config.models.flatMap(m => Array.from({ length: m.id === 'GEMINI' ? 4 : 2 }, (_, i) => ({ id: `${m.id === 'DEEPSEEK' ? 'D' : m.id === 'GLM' ? 'Z' : 'G'}${i + 1}`, modelId: m.id })));
-config.roles = { dedup: 'GLM', chair: 'GEMINI' };
+config.roles = { main: 'GEMINI', exploration: 'GEMINI', varina_gate: 'GLM', baseline_extraction: 'GLM', varina_delta: 'GEMINI', compaction: 'GEMINI' };
 config.retryDelayMs = 5000;
 config.timeoutMs = 180000;
 await writeFile(path.join(root, 'config.local.json'), JSON.stringify(config, null, 2) + '\n', { encoding: 'utf8', flag: 'wx' });

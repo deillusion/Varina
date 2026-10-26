@@ -85,11 +85,11 @@
   ],
   "roles": {
     "main": "GEMINI",
-    "grounder": "DEEPSEEK",
-    "assembly": "GEMINI",
-    "dedup": "DEEPSEEK",
-    "chair": "GEMINI",
-    "dealer": "DEEPSEEK"
+    "exploration": "GEMINI",
+    "varina_gate": "DEEPSEEK",
+    "baseline_extraction": "DEEPSEEK",
+    "varina_delta": "GEMINI",
+    "compaction": "GEMINI"
   },
   "generation": {
     "agent": {
@@ -102,36 +102,15 @@
       "reasoning_effort": "low",
       "max_output_tokens": 131072
     },
-    "dedup": {
-      "temperature": 0.1,
-      "reasoning_effort": "none",
-      "thinking": "disabled",
-      "max_output_tokens": 131072
-    },
-    "grounder": {
-      "temperature": 0.1,
+    "varina_gate": {
+      "temperature": 0,
       "reasoning_effort": "low",
-      "max_output_tokens": 32768
+      "max_output_tokens": 512
     },
-    "assembly": {
+    "varina_delta": {
       "temperature": 0.3,
       "reasoning_effort": "low",
       "max_output_tokens": 16384
-    },
-    "decision": {
-      "temperature": 0.5,
-      "reasoning_effort": "low",
-      "max_output_tokens": 131072
-    },
-    "chair": {
-      "temperature": 0.3,
-      "reasoning_effort": "low",
-      "max_output_tokens": 131072
-    },
-    "dealer": {
-      "temperature": 0.2,
-      "reasoning_effort": "low",
-      "max_output_tokens": 1024
     }
   },
   "decisionProviders": {
@@ -166,8 +145,6 @@
   },
   "retries": 2,
   "timeoutMs": 180000,
-  "minimumCreativeRatio": 0.5,
-  "minimumDecisionRatio": 0.5,
   "retryDelayMs": 5000,
   "max_tool_iterations": 100
 }

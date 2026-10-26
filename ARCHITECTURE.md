@@ -56,7 +56,7 @@ NodeFsHost       Gate → Baseline extraction → Decomposition → Subproblem a
 
 ## Retry policy
 
-`src/retry_policy.mjs` 是唯一的重试判据：带 HTTP status 的错误走白名单（408/409/429/5xx），其余（含 400）立即失败；不带 status 的本地解析/校验失败才重试，并且只有它才允许追加“只修复 JSON”的提示。`ModelGateway` 与旧的 `model_executor.mjs` 共用同一判据，避免两套重试语义分叉。
+`src/retry_policy.mjs` 是统一的重试判据：带 HTTP status 的错误走白名单（408/409/429/5xx），其余（含 400）立即失败；不带 status 的本地解析/校验失败才重试，并且只有它才允许追加“只修复 JSON”的提示。模型调用通过 `ModelGateway` 执行。
 
 ## Host layer
 
@@ -96,6 +96,10 @@ ReAct 自主使用 `Read / Glob / Grep` 查找和阅读资料，无写文件工�
 
 模型凭证只存在于运行期配置对象。`AgentSessionStore`、会话导出和模型调用审计均不保存 provider payload 或 API Key。
 
-## Compatibility boundary
+## Entry points and configuration migration
 
-`src/engine.mjs` 与 `src/application/RunService` 是旧多方案实验工作流的兼容路径，保留既有测试和历史记录读取能力。Web 主界面、CLI 和 MCP `varina_chat` (及兼容别名 `aha_chat`) 不依赖它。MCP 工具名 `varina_design_architecture` (及兼容别名 `aha_design_architecture`) 也已转接新 Agent，而非旧 RunService。
+Web、CLI 与 MCP 均通过 `AgentService` 运行。旧的固定轮次实验 engine、RunService、`/api/runs` 和独立 `mcp_ui.mjs` 工作台已移除；新版探索记录保存在会话的 `varina_runs` 中，与旧 run JSON 无依赖。已有旧 run 文件不会被自动删除。
+
+`src/config.mjs` 在加载和保存时统一规范化配置：将 Chair、Dealer、Dedup 等旧角色选择映射为 `main / exploration / varina_gate / baseline_extraction / varina_delta / compaction`，移除旧阶段生成参数及成功比例要求。运行时只使用新版角色；所有角色均参与模型可用性回退。设置页展示当前实际使用的角色。MCP 的 `aha_*` 工具名继续作为新版工具的兼容别名。
+
+回归测试位于 `test/`，通过 `npm test` 验证旧配置迁移、模型回退、Web 会话、深度探索和 MCP 协议。
