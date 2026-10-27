@@ -86,7 +86,11 @@ ReAct 自主使用 `Read / Glob / Grep` 查找和阅读资料，无写文件工�
 
 `UpdateBoardItem` 一次调用同时更新观点板和事实账本，省去单独的 RecordFact 调用与模型往返。参数为 `item_id / expected_revision / action / reason / patch`；patch 必须包含 `text` 和 `fact`，delete 也一样。fact 包含 `claim / status / explanation / evidence`，可带待核查主张的 claim_ref 和 search_coverage。confirmed/contradicted/partially_true 必须引用本次 ReAct 实际 Read 过的资料，并重新检查路径、行范围、原文片段和文件哈希。纯设计修改使用 not_applicable；资料不足使用 unknown。证据或参数无效时两份状态都不修改，版本冲突返回当前完整观点。删除只将观点标为 deleted，保留修订历史和事实，后续发散能看到删除原因。
 
-`exploration.rounds` 默认 5（允许 1–5）。提前输出终稿或调用 Finish 会被程序干预：追加对应的合成 Diverge 调用及完整结果，再继续同一 ReAct 上下文。达到轮数后再调用 Diverge 返回 ROUND_LIMIT，不运行席位。不会因为连续两轮无增量就提前结束。`exploration.maxReactSteps` 默认 100，步数耗尽、取消或模型失败保留部分结果并标记未完成。终稿由同一 ReAct 直接输出或通过 Finish 提交，Finish 校验方案只引用活跃、非子问题观点；没有固定 Grounder/Assembly 或额外 varina_delta 调用。未核查的依赖保留在 unresolved_questions 和交付文本中。
+`exploration.rounds` 默认 5（允许 1–5）。提前输出终稿或调用 Finish 会被程序干预：追加对应的合成 Diverge 调用及完整结果，再继续同一 ReAct 上下文。达到轮数后再调用 Diverge 返回 ROUND_LIMIT，不运行席位。不会因为连续两轮无增量就提前结束。`exploration.maxReactSteps` 默认 100，步数耗尽、取消或模型失败保留部分结果并标记未完成。终稿由同一 ReAct 直接输出或通过 Finish 提交，Finish 校验方案只引用活跃、非子问题观点；没有固定 Grounder/Assembly 或额外 varina_delta 调用。
+
+普通回答、探索终稿与兼容的 varina_delta 渲染共用 `USER_ANSWER_GUIDANCE`：围绕原始请求筛选观点、先给判断、用日常语言解释理由，可以按适用条件推荐方向，不展示内部观点/事实编号。发散的广度不决定回答长度；仅在用户要求或问题确实需要时展开详细清单。未核查依赖完整保留在 `unresolved_questions`、核查请求和事实账本中。探索 Agent 写终稿时可从受保护的工具结果中看到待核查主张与后续事实更新；最终 `unresolved_questions` 并集在回答生成后汇总。终稿与 varina_delta 按 `STANDALONE_ANSWER_GUIDANCE` 回顾最新状态，合并影响结论或落地的未决问题，用一小段话说明未知项、对建议的影响及确认所需的信息或验证；正文已解释的内容不重复，无相关未知项则省略。程序不再将完整依赖清单追加到终稿。
+
+探索终稿（含 Finish 和直接回答）与 varina_delta 渲染还共用 `STANDALONE_ANSWER_GUIDANCE`：只假定用户知道原始提问，不假定用户读过前序回答或观点板。前序回答及其提取观点继续作为内部素材；终稿不得承接内部叙述或沿用仅在草稿中定义的符号、缩写和术语，必要概念应独立解释。草稿中的公式、精确比例和普遍性断言仍需依据审查，不因多次重复而升级为事实。
 
 上下文机械压缩仅处理较早的读取/搜索正文。固定初始消息，以及 Diverge/UpdateBoardItem/Finish 的调用与完整结果不可裁剪；混合批次也整体保护，单条及单轮工具结果预算不得将这些结果换成落盘预览。`exploration.maxContextChars` 默认 1,000,000 字符；保护内容本身达到上限时停止并报告 EXPLORATION_CONTEXT_LIMIT，不删除观点历史继续运行。字符预算是近似上下文估计，不保证供应商 token 限制；供应商拒绝时按既有错误策略保留部分结果。
 

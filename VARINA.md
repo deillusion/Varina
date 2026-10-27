@@ -14,7 +14,7 @@
 **What it is not:**
 - 不是固定问题、顺序多轮、Chair 唯一裁决的僵化 Workflow（旧 engine/RunService 已移除）
 - ExploreDesign 不是主 Agent 在 ReAct 中调用的工具，而是常规回答完成后的增量探索阶段
-- 候选方案不评分、不排名、不选唯一赢家；探索终稿由同一 ReAct Agent 生成，不依赖固定 Assembly 阶段
+- 候选方案不做虚构评分或通用排名；回答应按用户目标和证据作出有条件的推荐。探索终稿由同一 ReAct Agent 筛选、综合后生成，不依赖固定 Assembly 阶段
 - 不是带 Git 依赖或第三方 npm 运行时的工程
 
 **Operational boundary:** 默认这是领域设计与机制推演对话。对用户业务/游戏/世界/机制/算子/观点板/事实账本/装配方案的讨论都按领域设计处理；只有用户明确要求实现或点名具体文件改动时，才视为对本仓库源码的修改请求。
@@ -93,7 +93,7 @@
 - 不要以 README 的历史命名（.aha/backups、.aha/tool-results、“Aha 探索”）为权威；以实际实现为准。
 - 不得在会话存储、导出或审计中写入 API Key / provider payload，也不得自动重跑 interrupted 会话。
 - 不要把资料未搜索到当作不存在的证据；记录搜索范围并保留未知依赖。
-- 发散增量默认未核查，不能冒充已确认事实；终稿保留待核查主张与 unknown/stale 依赖。
+- 发散增量默认未核查，不能冒充已确认事实；待核查主张与 unknown/stale 依赖完整保留在结构化记录中，终稿就地解释影响判断的关键不确定性，不倾倒完整清单或内部编号。
 - 不要把普通读取/搜索的超限结果当作截断丢弃：它应落盘并保留预览与 persisted_path；观点与事实工具结果则必须完整保留。
 - Treat this file as a stable constitution, not a dynamic scratchpad. Do not mutate it after ordinary tasks.
 

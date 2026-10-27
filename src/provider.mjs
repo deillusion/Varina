@@ -3,9 +3,8 @@ import { getModelApiKey } from './config.mjs';
 export function buildPayload(model, request) {
   const responseSchema = request.schema;
   const generation = request.generation ?? {};
-  const effectiveOutputLimit = Math.min(generation.max_output_tokens ?? 8192, model.maxOutputTokens ?? Infinity);
   if (model.protocol === 'gemini') {
-    const generationConfig = { maxOutputTokens: effectiveOutputLimit };
+    const generationConfig = {};
     if (model.supportsTemperature && generation.temperature !== undefined) generationConfig.temperature = generation.temperature;
     if (model.supportsReasoning) {
       if (generation.reasoning_effort === 'none' || generation.thinking === 'disabled') {
@@ -49,7 +48,7 @@ export function buildPayload(model, request) {
       })) }] } : {})
     };
   }
-  const payload = { model: model.model, messages: structuredClone(request.messages), [model.tokenParameter]: effectiveOutputLimit };
+  const payload = { model: model.model, messages: structuredClone(request.messages) };
   if (model.supportsTemperature && generation.temperature !== undefined) payload.temperature = generation.temperature;
   if (model.supportsReasoning && generation.reasoning_effort) payload.reasoning_effort = model.reasoningEffortMap?.[generation.reasoning_effort] ?? generation.reasoning_effort;
   if (model.supportsSeed) payload.seed = request.seed;

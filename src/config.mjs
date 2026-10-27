@@ -34,10 +34,10 @@ export function normalizeConfig(input) {
   const generation = config.generation ?? {};
   config.generation = {
     ...generation,
-    agent: structuredClone(generation.agent ?? generation.chair ?? { max_output_tokens: 8192, temperature: 0.3, reasoning_effort: 'low' }),
-    creative: generation.creative ?? { max_output_tokens: 8192, temperature: 0.2, reasoning_effort: 'low' },
-    varina_gate: generation.varina_gate ?? generation.decision ?? { max_output_tokens: 512, temperature: 0, reasoning_effort: 'low' },
-    varina_delta: structuredClone(generation.varina_delta ?? generation.chair ?? { max_output_tokens: 4096, temperature: 0.2, reasoning_effort: 'low' })
+    agent: structuredClone(generation.agent ?? generation.chair ?? { temperature: 0.3, reasoning_effort: 'low' }),
+    creative: generation.creative ?? { temperature: 0.2, reasoning_effort: 'low' },
+    varina_gate: generation.varina_gate ?? generation.decision ?? { temperature: 0, reasoning_effort: 'low' },
+    varina_delta: structuredClone(generation.varina_delta ?? generation.chair ?? { temperature: 0.2, reasoning_effort: 'low' })
   };
   for (const key of ['extractor', 'chair', 'dedup', 'dealer', 'decision', 'grounder', 'assembly']) delete config.generation[key];
   for (const key of ['minimumCreativeRatio', 'minimumDecisionRatio', 'default_max_mechanisms']) delete config[key];
@@ -229,7 +229,7 @@ export function validateConfig(c, mode, { allowKeyless = false } = {}) {
   for (const role of MODEL_ROLES) if (c.roles?.[role] != null) assert(ids.includes(c.roles[role]), `缺少 ${role} 模型`);
   for (const phase of ['agent', 'creative']) assert(c.generation?.[phase], `缺少 ${phase} 生成参数`);
   for (const [phase, g] of Object.entries(c.generation ?? {})) {
-    assert(g && Number.isInteger(g.max_output_tokens) && g.max_output_tokens > 0, `${phase} token 上限错误`);
+    assert(g && (g.max_output_tokens == null || (Number.isInteger(g.max_output_tokens) && g.max_output_tokens > 0)), `${phase} token 上限错误`);
     assert(Number.isFinite(g.temperature) && g.temperature >= 0 && g.temperature <= 2, `${phase} temperature 错误`);
     assert(g.thinking == null || ['enabled', 'disabled'].includes(g.thinking), `${phase} thinking 必须是 enabled 或 disabled`);
   }

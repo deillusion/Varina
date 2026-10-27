@@ -1195,7 +1195,8 @@ export class ExploreDesignEngine {
     const unresolvedClaims = runtime.verification_requests.filter(request => ['pending', 'unknown', 'stale'].includes(request.status));
     unresolvedQuestions = [...new Set([...unresolvedQuestions, ...unresolvedClaims.map(request => request.claim),
       ...runtime.fact_ledger.filter(fact => ['unknown', 'stale'].includes(fact.status)).map(fact => fact.claim)])];
-    if (runtime.final_text && unresolvedQuestions.length) runtime.final_text += `\n\n尚未解决的依赖：\n${unresolvedQuestions.map(question => `- ${question}`).join('\n')}`;
+    // Keep the complete audit backlog in structured state. The answer already
+    // explains the uncertainty that matters to its recommendation in context.
     const handoff = {
       run_id: runId, terminal: true, state: runtime.status,
       final_text: runtime.final_text ?? null,

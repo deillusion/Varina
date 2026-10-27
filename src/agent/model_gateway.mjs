@@ -342,15 +342,15 @@ export class ModelGateway {
 }
 
 export function generationFor(config, phase) {
-  const fallback = { temperature: 0.2, reasoning_effort: 'low', max_output_tokens: 8192 };
+  const fallback = { temperature: 0.2, reasoning_effort: 'low' };
   if (!config?.generation) return fallback;
   if (phase === 'agent_turn' || phase === 'varina_react') return config.generation.agent ?? fallback;
-  if (phase === 'varina_gate') return config.generation.varina_gate ?? { temperature: 0, reasoning_effort: 'low', max_output_tokens: 512 };
-  if (phase === 'baseline_extraction') return config.generation.baseline_extraction ?? { temperature: 0, reasoning_effort: 'low', max_output_tokens: 8192 };
-  if (phase === 'varina_delta') return config.generation.varina_delta ?? { temperature: 0.2, reasoning_effort: 'low', max_output_tokens: 4096 };
+  if (phase === 'varina_gate') return config.generation.varina_gate ?? { temperature: 0, reasoning_effort: 'low' };
+  if (phase === 'baseline_extraction') return config.generation.baseline_extraction ?? { temperature: 0, reasoning_effort: 'low' };
+  if (phase === 'varina_delta') return config.generation.varina_delta ?? { temperature: 0.2, reasoning_effort: 'low' };
   if (phase === 'varina_decomposition_seat') return config.generation.decomposition ?? config.generation.creative ?? fallback;
   if (phase === 'varina_subproblem_answer') return config.generation.subproblemExpansion ?? config.generation.creative ?? fallback;
   if (phase === 'varina_seat' || phase === 'aha_seat') return config.generation.creative ?? fallback;
-  if (phase === 'compaction') return config.generation.compaction ?? { temperature: 0.1, reasoning_effort: 'low', max_output_tokens: 2048 };
+  if (phase === 'compaction') return config.generation.compaction ?? { temperature: 0.1, reasoning_effort: 'low' };
   return fallback;
 }
