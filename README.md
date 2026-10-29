@@ -52,6 +52,26 @@ Varina 的做法是：**让多个 AI 反复讨论、发散、核查，而不是�
 
 算子是生成思路的方法，交付给设计者的仍是清楚的规则、理由和边界，不要求读者掌握算子术语。工作台会显示各席位抽到的卡，方便回看一个方向从何而来。
 
+### 注入自己的算子库
+
+算子内容由宿主提供，沿 `AgentService → AgentSession → VaryEngine` 传递；内核只定义字段契约和抽样规则，不导入内置算子库。Web、CLI、MCP 默认入口显式提供上述 40 个算子，原有启动方式保持不变。
+
+私有宿主可以从独立的私有包或仓库加载算子，再通过构造参数替换整个算子池：
+
+```js
+import { AgentService } from './src/agent/agent_service.mjs';
+import { operators } from '@your-org/private-varina-operators';
+
+const service = new AgentService({ root: appRoot, workspaceRoot, operatorPool: operators });
+await service.init();
+```
+
+上例中的 `appRoot` 和 `workspaceRoot` 由宿主提供。现成 Web 和 MCP 入口也支持 `createApp({ operatorPool })`、`startMcpServer({ operatorPool })`。`AgentService` 和 `AgentSession` 省略算子池仍可进行普通对话，启动深度探索会报缺少注入；直接创建 `VaryEngine` 则必须传入算子池。这些核心类都不会回退到内置库。
+
+每个算子的 `operator_id / family / name / prompt` 都是非空字符串，ID 必须唯一；`enabled` 是可选布尔值，默认 `true`。至少需要三个启用的分类；每席位仍从不同分类抽取三个算子。注入时复制并冻结算子池，调用方之后修改原数组不会改变已创建服务的行为。需要组合默认库和私有库时，由宿主合并后注入，内核不自动追加默认内容。
+
+内核源码可与私有算子库分别发布。这种分离不隐藏运行时提示词：算子会发给所选模型，工作台配置接口及运行中的 checkpoint 也会包含算子正文。若算子内容需要保留在服务端，应由私有服务托管宿主，并另外控制这些数据的访问。
+
 ## 一次探索会留下什么
 
 围绕同一个设计问题，Varina 会逐轮整理以下成果：

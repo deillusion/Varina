@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { operators, random, sampleOperators } from '../operators.mjs';
+import { createOperatorPool, random, sampleOperators } from './operator_pool.mjs';
 import { ExplorationReact } from './react.mjs';
 import { generationFor } from '../agent/model_gateway.mjs';
 import {
@@ -612,11 +612,12 @@ function appendSubproblemElementsToBoard(runtime, elements, state) {
 }
 
 export class VaryEngine {
-  constructor({ host, gateway, decisionGateway = null, config, signal, onEvent = () => {}, checkpoint = async () => {} }) {
+  constructor({ host, gateway, decisionGateway = null, config, operatorPool, signal, onEvent = () => {}, checkpoint = async () => {} }) {
     this.host = host;
     this.gateway = gateway;
     this.decisionGateway = decisionGateway;
     this.config = config;
+    this.operatorPool = createOperatorPool(operatorPool);
     this.signal = signal;
     this.onEvent = onEvent;
     this.checkpoint = checkpoint;
@@ -996,7 +997,7 @@ export class VaryEngine {
     const commonPrefix = buildCommonPrefix(runtime, runtime.repository_snapshot_id, packetToken, focus);
     runtime.common_prefix = commonPrefix;
     try { runtime.frozen_packet = JSON.parse(commonPrefix); } catch { runtime.frozen_packet = null; }
-    const assignments = seats.map(seat => ({ seat, operators: sampleOperators(rng, operators) }));
+    const assignments = seats.map(seat => ({ seat, operators: sampleOperators(rng, this.operatorPool) }));
     runtime.current_assignments = assignments.map(a => ({
       seat_id: a.seat.id,
       modelId: a.seat.modelId,

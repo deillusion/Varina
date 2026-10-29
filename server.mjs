@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs';
 import { exec } from 'node:child_process';
 import { ConfigService } from './src/application/config_service.mjs';
 import { AgentService, AgentTurnConflictError } from './src/agent/agent_service.mjs';
+import { operators as defaultOperators } from './src/operators.mjs';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const defaultSessionDataDir = path.join(root, '.varina/data/sessions');
 
@@ -28,12 +29,13 @@ async function ensureDataMigration(rootPath) {
 
 export async function createApp({
   sessionDataDir = defaultSessionDataDir,
-  workspaceRoot = process.env.VARINA_WORKSPACE_ROOT || process.env.AHA_WORKSPACE_ROOT || os.homedir()
+  workspaceRoot = process.env.VARINA_WORKSPACE_ROOT || process.env.AHA_WORKSPACE_ROOT || os.homedir(),
+  operatorPool = defaultOperators
 } = {}) {
   await ensureDataMigration(root);
-  const agentService = new AgentService({ root, dataDir: sessionDataDir, workspaceRoot });
+  const agentService = new AgentService({ env: process.env, root, dataDir: sessionDataDir, workspaceRoot, operatorPool });
   await agentService.init();
-  const configService = new ConfigService({ root });
+  const configService = new ConfigService({ root, operatorPool: agentService.operatorPool });
   async function body(req) { const chunks = []; let size = 0; for await (const chunk of req) { chunks.push(chunk); size += chunk.length; if (size > 512000) throw new Error('请求体过大'); } return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); }
   const server = http.createServer(async (req, res) => {
     const json = (status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(value)); };

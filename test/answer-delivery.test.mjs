@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VaryEngine } from '../src/varina/vary.mjs';
+import { operators } from '../src/operators.mjs';
 import { EXPLORATION_TOOLS } from '../src/varina/react.mjs';
 import { validateJsonSchema } from '../src/agent/schemas.mjs';
 import { MemoryHost } from '../src/host/node_fs_host.mjs';
@@ -70,6 +71,7 @@ test('Finish closes exploration and preserves the investigation handoff', async 
       return { message: 'This text must not become the user-facing answer.', tool_calls: [] };
     } };
     const engine = new VaryEngine({
+      operatorPool: operators,
       host: new MemoryHost(), gateway, config,
       checkpoint: async runtime => { finalCheckpoint = structuredClone(runtime); }
     });

@@ -1,3 +1,6 @@
+import { sampleOperators as sampleFromPool } from './varina/operator_pool.mjs';
+export { random } from './varina/operator_pool.mjs';
+
 export const OPERATOR_VERSION = 'operators-v5';
 const families = {
   "前提": [
@@ -218,20 +221,6 @@ const families = {
   ]
 };
 export const operators = Object.entries(families).flatMap(([family, rows]) => rows.map(([operator_id, name, prompt]) => ({ operator_id, family, name, prompt, enabled: true })));
-export function random(seed) {
-  let x = seed >>> 0;
-  return () => { x += 0x6D2B79F5; let t = Math.imul(x ^ x >>> 15, 1 | x); t ^= t + Math.imul(t ^ t >>> 7, 61 | t); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
-}
 export function sampleOperators(rng, pool = operators) {
-  const genericEnabled = pool.filter(o => o.enabled);
-  const genericFamilies = [...new Set(genericEnabled.map(o => o.family))].sort();
-  if (genericFamilies.length < 3) throw new Error('可用通用算子族不足');
-  const picked = [];
-  const availableFamilies = [...genericFamilies];
-  while (picked.length < 3) {
-    const family = availableFamilies.splice(Math.floor(rng() * availableFamilies.length), 1)[0];
-    const choices = genericEnabled.filter(o => o.family === family);
-    picked.push(choices[Math.floor(rng() * choices.length)]);
-  }
-  return picked;
+  return sampleFromPool(rng, pool);
 }

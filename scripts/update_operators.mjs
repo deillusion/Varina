@@ -27,21 +27,10 @@ for (let i = 0; i < lines.length; i++) {
   }
 }
 
-const fileHeader = "export const OPERATOR_VERSION = 'operators-v5';\nconst families = ";
+const fileHeader = "import { sampleOperators as sampleFromPool } from './varina/operator_pool.mjs';\nexport { random } from './varina/operator_pool.mjs';\n\nexport const OPERATOR_VERSION = 'operators-v5';\nconst families = ";
 const fileFooter = `;\nexport const operators = Object.entries(families).flatMap(([family, rows]) => rows.map(([operator_id, name, prompt]) => ({ operator_id, family, name, prompt, enabled: true })));
-export function random(seed) {
-  let x = seed >>> 0;
-  return () => { x += 0x6D2B79F5; let t = Math.imul(x ^ x >>> 15, 1 | x); t ^= t + Math.imul(t ^ t >>> 7, 61 | t); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
-}
 export function sampleOperators(rng, pool = operators) {
-  const enabled = pool.filter(o => o.enabled);
-  const available = [...new Set(enabled.map(o => o.family))].sort();
-  if (available.length < 3) throw new Error('至少需要 3 个启用的 operator family');
-  return Array.from({ length: 3 }, () => {
-    const family = available.splice(Math.floor(rng() * available.length), 1)[0];
-    const choices = enabled.filter(o => o.family === family);
-    return choices[Math.floor(rng() * choices.length)];
-  });
+  return sampleFromPool(rng, pool);
 }
 `;
 

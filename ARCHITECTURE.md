@@ -75,7 +75,36 @@ NodeFsHost       Gate → Baseline extraction → Decomposition → Subproblem a
 
 `MemoryHost` 实现相同端口，用于离线测试与可重复模拟。
 
+### Workspace and environment injection
+
+`AgentService` 的工作区入口通过 `workspaceHost` 注入，与处理文件内容的 `hostFactory` 分开：
+
+- `root`：允许的工作区根标识，可为本地路径或由适配器定义的虚拟标识。
+- `init()`：初始化并验证根工作区；可设置 `realRoot` 为规范化根标识。
+- `resolve(requested)`：将指定工作区解析成规范标识，省略参数时使用根工作区；适配器负责访问权限及边界检查。
+- `browse(requested)`：返回 `{ root, current, parent, directories }`，目录项为 `{ name, path, hidden }`。
+
+默认 `NodeWorkspaceHost` 保留本地路径、目录与 symlink/junction 边界检查。服务本身不再直接调用 `realpath / stat / readdir` 或解释工作区路径。使用虚拟工作区时，应同时注入 `store / configLoader / hostFactory / gatewayFactory / decisionGatewayFactory`，避免使用本地默认实现。
+
+`configLoader(root, mode)` 返回可直接运行的配置：`models` 是接入方已筛选的可用模型列表，`roles` 和 `seats` 只引用该列表中的 ID。内核仅检查模型 ID 和引用关系，不检查 API Key、读取凭据环境变量、筛除模型或重新分配角色和席位。自定义网关无需提供 `apiKey / apiKeyEnv / isKeyless` 等默认供应商字段。默认 `loadNodeAgentConfig` 在 Node 接入层加载本地配置、按凭据执行现有筛选与回退，并将筛选后的模型列表交给内核；配置界面仍可查看完整配置及回退预览。
+
+普通轮次与用户确认后继续探索共用会话依赖创建逻辑，两条路径均通过同一组工厂创建文件宿主、模型网关和决策网关，并传递本次运行的取消信号与调用记录回调。拒绝探索不创建这些依赖。
+
+`AgentService` 和 `AgentSession` 接受 `env` 对象，默认 `{}`。工具续轮上限与上下文压缩阈值只读取该对象，不直接读取 `process.env`。服务将同一对象传给普通轮次及确认后继续运行的会话；压缩辅助函数也支持显式传入 `env`。Web、CLI 与 MCP 应用入口传入 `process.env`，保留现有环境变量配置方式。默认模型、Jev 与网络适配器仍管理各自的凭据和代理环境变量；这里的 `env` 用于会话运行参数。
+
+这项拆分针对完整 Node.js 22+ 环境下的宿主能力注入；内置 crypto、events、TLS、child_process 等模块无需移除，也不代表已支持裁剪过的 Node 运行时。
+
 ## Varina engine
+
+### Operator injection
+
+`operatorPool` 由宿主经 `AgentService → AgentSession → VaryEngine` 传递。核心 `src/varina/operator_pool.mjs` 只实现字段校验、不可变快照、种子随机数和抽样；Agent、引擎及配置概览均不导入 `src/operators.mjs`。默认算子库由 Web、CLI、MCP 接入层显式注入；`createApp` 和 `startMcpServer` 支持覆盖。直接集成内核时，宿主负责提供算子池，缺省仅允许普通聊天，启动探索报错，不回退或合并内置库。
+
+算子记录为 `{ operator_id, family, name, prompt, enabled? }`，四个字符串字段非空，ID 全池唯一，enabled 缺省 true。可用分类至少三个，每席位仍从不同分类抽三张，随机数算法及抽取顺序保持兼容。服务构造时校验并复制冻结，直接创建引擎也执行同一校验。两条探索启动路径共用服务持有的快照；`ConfigService` 从宿主接收同一快照，避免界面展示与实际分配不一致。
+
+私有库可保存在独立包或仓库，由私有宿主 import 后注入。此接口只分离源码所有权，不提供提示词保密或发布打包机制：默认配置概览包含全池正文，运行中的 checkpoint 保存被分配算子的正文，所选模型也会收到正文。开源发布、许可证选择及私有服务访问控制由发行方另行决定。
+
+### Exploration flow
 
 `VaryEngine` 是普通 ReAct 完成后的可选增量阶段，不暴露给主 Agent 的工具循环。开关开启时，后置 gate 只在任务显然与深度探索无关时请求用户确认；不确定默认启动，确认状态持久化且没有计时超时。真实模式配置 `TYPESAFE_API_KEY` 后，这个 gate 由独立的 Jev System One 决策网关执行：只提交状态与 `START / ASK` 选项并读取概率，不进入聊天模型路由，也不生成用户可见文本；模拟模式、未配置凭据或调用失败时沿用保守的本地/既有回退。
 

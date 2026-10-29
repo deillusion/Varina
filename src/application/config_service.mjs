@@ -1,6 +1,5 @@
 import { loadConfig, saveConfig, getModelApiKey, isModelAvailable, resolveActiveConfig } from '../config.mjs';
 import { chatCompletion } from '../provider.mjs';
-import { operators } from '../operators.mjs';
 import { getJevApiKey } from '../decision/jev_gateway.mjs';
 
 function sanitizedConfig(config) {
@@ -28,7 +27,10 @@ function sanitizedConfig(config) {
 }
 
 export class ConfigService {
-  constructor({ root } = {}) { this.root = root; }
+  constructor({ root, operatorPool = [] } = {}) {
+    this.root = root;
+    this.operatorPool = operatorPool;
+  }
 
   async overview(extra = {}) {
     let liveConfig = null;
@@ -57,7 +59,7 @@ export class ConfigService {
       rawConfigPresent: !!liveConfig,
       liveError,
       routingPreview,
-      operators,
+      operators: this.operatorPool,
       ...extra
     };
   }

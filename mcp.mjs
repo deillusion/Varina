@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import readline from 'node:readline';
 import { AgentService, AgentTurnConflictError } from './src/agent/agent_service.mjs';
+import { operators as defaultOperators } from './src/operators.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = path.resolve(process.env.VARINA_WORKSPACE_ROOT || process.env.AHA_WORKSPACE_ROOT || path.resolve(root, '..'));
@@ -153,8 +154,8 @@ function handleMessage(message) {
   return sendError(id, -32601, `Method not found: ${method}`);
 }
 
-export async function startMcpServer({ dataDir } = {}) {
-  agentService = new AgentService({ root, workspaceRoot, dataDir });
+export async function startMcpServer({ dataDir, operatorPool = defaultOperators } = {}) {
+  agentService = new AgentService({ env: process.env, root, workspaceRoot, dataDir, operatorPool });
   await agentService.init();
   const lines = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
   lines.on('close', () => { void agentService.stop(); });

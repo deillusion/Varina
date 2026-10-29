@@ -16,13 +16,13 @@ export const DEFAULT_KEEP_RECENT_TURNS = 2;
  * Resolve pre-turn and mid-turn thresholds with token and char support.
  * Defaults to 768K tokens (or higher if specified in config/env).
  */
-export function resolveCompactionThresholds(config = {}) {
-  const envTokens = process.env.VARINA_PRE_TURN_COMPACTION_TOKENS ? Number(process.env.VARINA_PRE_TURN_COMPACTION_TOKENS) : null;
+export function resolveCompactionThresholds(config = {}, env = {}) {
+  const envTokens = env.VARINA_PRE_TURN_COMPACTION_TOKENS ? Number(env.VARINA_PRE_TURN_COMPACTION_TOKENS) : null;
   const configTokens = config.compaction?.pre_turn_threshold_tokens != null
     ? Number(config.compaction.pre_turn_threshold_tokens)
     : envTokens;
 
-  const envChars = process.env.VARINA_PRE_TURN_COMPACTION_THRESHOLD ? Number(process.env.VARINA_PRE_TURN_COMPACTION_THRESHOLD) : null;
+  const envChars = env.VARINA_PRE_TURN_COMPACTION_THRESHOLD ? Number(env.VARINA_PRE_TURN_COMPACTION_THRESHOLD) : null;
   const configChars = config.compaction?.pre_turn_threshold != null
     ? Number(config.compaction.pre_turn_threshold)
     : envChars;
@@ -40,11 +40,11 @@ export function resolveCompactionThresholds(config = {}) {
 
   const configMidTokens = config.compaction?.mid_turn_threshold_tokens != null
     ? Number(config.compaction.mid_turn_threshold_tokens)
-    : (process.env.VARINA_MID_TURN_COMPACTION_TOKENS ? Number(process.env.VARINA_MID_TURN_COMPACTION_TOKENS) : null);
+    : (env.VARINA_MID_TURN_COMPACTION_TOKENS ? Number(env.VARINA_MID_TURN_COMPACTION_TOKENS) : null);
 
   const configMidChars = config.compaction?.mid_turn_threshold != null
     ? Number(config.compaction.mid_turn_threshold)
-    : (process.env.VARINA_MID_TURN_COMPACTION_THRESHOLD ? Number(process.env.VARINA_MID_TURN_COMPACTION_THRESHOLD) : null);
+    : (env.VARINA_MID_TURN_COMPACTION_THRESHOLD ? Number(env.VARINA_MID_TURN_COMPACTION_THRESHOLD) : null);
 
   let midTurnTokens = Math.round(preTurnTokens * 1.15);
   let midTurnChars = Math.round(midTurnTokens * 2.5);
@@ -168,6 +168,7 @@ export function shouldCompactPreTurn({
   messages,
   compaction,
   config = {},
+  env = {},
   currentTurn,
   force = false
 }) {
@@ -178,7 +179,7 @@ export function shouldCompactPreTurn({
   const completedTurnCount = Math.max(0, (currentTurn ?? 1) - 1);
   const lastCompactedTurn = compaction?.last_compacted_turn ?? 0;
   const keepRecentTurns = Number(config.compaction?.keep_recent_turns ?? DEFAULT_KEEP_RECENT_TURNS);
-  const thresholds = resolveCompactionThresholds(config);
+  const thresholds = resolveCompactionThresholds(config, env);
 
   const maxCandidateTurn = completedTurnCount - keepRecentTurns;
   if (maxCandidateTurn <= lastCompactedTurn) {

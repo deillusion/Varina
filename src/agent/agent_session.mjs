@@ -135,17 +135,19 @@ async function refreshLoadedFacts(session, host) {
 }
 
 export class AgentSession {
-  constructor({ state, host, store, gateway, decisionGateway, config, signal, onEvent = () => {}, gate = new VarinaGateController(), maxToolIterations } = {}) {
+  constructor({ state, host, store, gateway, decisionGateway, config, operatorPool, signal, onEvent = () => {}, gate = new VarinaGateController(), env = {}, maxToolIterations } = {}) {
     this.state = state;
     this.host = host;
     this.store = store;
     this.gateway = gateway;
     this.decisionGateway = decisionGateway;
     this.config = config;
+    this.operatorPool = operatorPool;
     this.signal = signal;
     this.onEvent = onEvent;
     this.gate = gate;
-    const envVal = process.env.VARINA_MAX_TOOL_ITERATIONS || process.env.AHA_MAX_TOOL_ITERATIONS;
+    this.env = env;
+    const envVal = env.VARINA_MAX_TOOL_ITERATIONS || env.AHA_MAX_TOOL_ITERATIONS;
     this.maxToolIterations = Number(config?.max_tool_iterations ?? (envVal ? Number(envVal) : null) ?? maxToolIterations ?? 100);
   }
 
@@ -228,6 +230,7 @@ export class AgentSession {
           messages: this.state.messages,
           compaction: this.state.compaction,
           config: this.config,
+          env: this.env,
           currentTurn: this.state.current_turn
         });
 
@@ -440,7 +443,7 @@ export class AgentSession {
           messages.push({ role: 'user', content: renderToolResults(budgeted.results) });
         }
 
-        const thresholds = resolveCompactionThresholds(this.config);
+        const thresholds = resolveCompactionThresholds(this.config, this.env);
         const midResult = compactWorkingMessages(messages, {
           midTurnThreshold: thresholds.midTurnChars,
           currentIteration: iteration
@@ -798,7 +801,7 @@ export class AgentSession {
         messages.push({ role: 'assistant', content: JSON.stringify(output) });
         messages.push({ role: 'user', content: renderToolResults(budgeted.results) });
       }
-      const thresholds = resolveCompactionThresholds(this.config);
+      const thresholds = resolveCompactionThresholds(this.config, this.env);
       const midResult = compactWorkingMessages(messages, {
         midTurnThreshold: thresholds.midTurnChars,
         currentIteration: iteration
@@ -1088,6 +1091,17 @@ export class AgentSession {
     const loadedPaths = new Set((this.state.loaded_files_manifest ?? []).map(item => item.file_path));
     const unreadPath = args.relevant_files.find(file => !loadedPaths.has(file));
     if (unreadPath) throw new Error(`relevant_files 只能包含本轮或此前由 Read 加载的文件：${unreadPath}`);
+    const engine = new VaryEngine({
+      operatorPool: this.operatorPool,
+      host: this.host, gateway: this.gateway, decisionGateway: this.decisionGateway, config: this.config, signal: this.signal,
+      onEvent: this.onEvent,
+      checkpoint: async runtime => {
+        delete this.state.active_varina_progress;
+        this.state.active_varina_runtime = runtime;
+        this.state.active_aha_runtime = runtime;
+        await this.save();
+      }
+    });
     const runRecord = {
       run_id: `varina-${Date.now()}-${randomUUID().slice(0, 6)}`,
       turn_invoked: turnInvoked,
@@ -1111,16 +1125,6 @@ export class AgentSession {
     if (!this.state.aha_runs) this.state.aha_runs = this.state.varina_runs;
     else if (this.state.aha_runs !== this.state.varina_runs) this.state.aha_runs.push(runRecord);
     await this.save();
-    const engine = new VaryEngine({
-      host: this.host, gateway: this.gateway, decisionGateway: this.decisionGateway, config: this.config, signal: this.signal,
-      onEvent: this.onEvent,
-      checkpoint: async runtime => {
-        delete this.state.active_varina_progress;
-        this.state.active_varina_runtime = runtime;
-        this.state.active_aha_runtime = runtime;
-        await this.save();
-      }
-    });
     const handoff = await engine.run({
       sessionId: this.state.session_id, runId: runRecord.run_id,
       problem: rawRequest,

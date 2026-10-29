@@ -10,10 +10,14 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { loadConfig, normalizeConfig, resolveActiveConfig, saveConfig, validateConfig } from '../src/config.mjs';
 import { buildPayload } from '../src/provider.mjs';
 import { createApp } from '../server.mjs';
+import { operators as defaultOperators } from '../src/operators.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const roles = ['main', 'exploration', 'varina_gate', 'baseline_extraction', 'varina_delta', 'compaction'];
 const retired = ['chair', 'dedup', 'dealer', 'decision', 'grounder', 'assembly', 'extractor'];
+const customOperators = ['a', 'b', 'c'].map(id => ({
+  operator_id: `external-${id}`, family: id, name: `External ${id}`, prompt: `External instruction ${id}`
+}));
 
 async function temporaryDirectory() {
   const parent = await realpath(os.tmpdir());
@@ -119,7 +123,8 @@ test('provider uses explicit schemas for both protocols without injecting old wo
   assert.equal(plain.messages.length, 1);
 });
 
-test('Web keeps chat, exploration and session history working while old endpoints return 404', { timeout: 30000 }, async t => {
+for (const injected of [false, true]) {
+test(`Web keeps chat, exploration and session history working with ${injected ? 'injected' : 'default'} operators`, { timeout: 30000 }, async t => {
   const temp = await temporaryDirectory();
   let app;
   t.after(async () => {
@@ -127,7 +132,10 @@ test('Web keeps chat, exploration and session history working while old endpoint
     if (app?.server.listening) await new Promise(resolve => app.server.close(resolve));
     await temp.cleanup();
   });
-  app = await createApp({ workspaceRoot: temp.directory, sessionDataDir: path.join(temp.directory, 'sessions') });
+  app = await createApp({
+    workspaceRoot: temp.directory, sessionDataDir: path.join(temp.directory, 'sessions'),
+    ...(injected ? { operatorPool: customOperators } : {})
+  });
   app.server.listen(0, '127.0.0.1');
   await once(app.server, 'listening');
   const base = `http://127.0.0.1:${app.server.address().port}`;
@@ -142,6 +150,8 @@ test('Web keeps chat, exploration and session history working while old endpoint
   }
   assert.equal((await fetch(base)).status, 200);
   const overview = await (await fetch(base + '/api/config')).json();
+  const expectedOperators = injected ? customOperators.map(operator => ({ ...operator, enabled: true })) : defaultOperators;
+  assert.deepEqual(overview.operators, expectedOperators);
   assert.equal(overview.mockConfig.roles.chair, undefined);
   assert.equal(overview.experiments, undefined);
   assert.equal(overview.domainCatalog, undefined);
@@ -166,6 +176,13 @@ test('Web keeps chat, exploration and session history working while old endpoint
   const run = explored.varina_runs[0];
   assert.equal(run.rounds_executed, 5);
   assert.equal(run.stop_reason, 'required_rounds_complete');
+  const expectedIds = new Set(expectedOperators.map(operator => operator.operator_id));
+  for (const round of run.round_records) {
+    for (const ids of Object.values(round.allocated_operators)) {
+      assert.equal(ids.length, 3);
+      assert.ok(ids.every(id => expectedIds.has(id)));
+    }
+  }
   assert.ok(run.final_meeting_board.points.length > 0);
   assert.ok(explored.messages.some(message => message.message_kind === 'baseline'));
   assert.ok(explored.messages.some(message => message.message_kind === 'varina_addendum'));
@@ -175,11 +192,13 @@ test('Web keeps chat, exploration and session history working while old endpoint
   const listed = await (await fetch(base + '/api/agent/sessions')).json();
   assert.equal(listed.sessions[0].session_id, id);
 });
+}
 
-test('MCP lists current tools and executes chat and design through Agent sessions', { timeout: 30000 }, async t => {
+for (const injected of [false, true]) {
+test(`MCP executes chat and design with ${injected ? 'injected' : 'default'} operators`, { timeout: 30000 }, async t => {
   const temp = await temporaryDirectory();
   const child = spawn(process.execPath, ['--input-type=module', '--eval',
-    "import { startMcpServer } from './mcp.mjs'; await startMcpServer({dataDir:process.env.VARINA_TEST_DATA_DIR});"
+    `import { startMcpServer } from './mcp.mjs'; await startMcpServer({dataDir:process.env.VARINA_TEST_DATA_DIR${injected ? `,operatorPool:${JSON.stringify(customOperators)}` : ''}});`
   ], { cwd: root, env: { ...process.env, VARINA_WORKSPACE_ROOT: temp.directory, VARINA_TEST_DATA_DIR: path.join(temp.directory, 'sessions') }, windowsHide: true });
   let stderr = '';
   let buffer = '';
@@ -229,4 +248,12 @@ test('MCP lists current tools and executes chat and design through Agent session
   const session = JSON.parse(await readFile(path.join(temp.directory, 'sessions', 'mock', `${id}.json`), 'utf8'));
   assert.equal(session.varina_runs[0].rounds_executed, 5);
   assert.equal(session.varina_runs[0].stop_reason, 'required_rounds_complete');
+  const expectedIds = new Set((injected ? customOperators : defaultOperators).map(operator => operator.operator_id));
+  for (const round of session.varina_runs[0].round_records) {
+    for (const ids of Object.values(round.allocated_operators)) {
+      assert.equal(ids.length, 3);
+      assert.ok(ids.every(id => expectedIds.has(id)));
+    }
+  }
 });
+}

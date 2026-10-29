@@ -1,12 +1,29 @@
-import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import { readdir, realpath, stat } from 'node:fs/promises';
-import { loadConfig, resolveActiveConfig } from '../config.mjs';
+import { NodeWorkspaceHost, defaultWorkspaceRoot, defaultSessionDataDir } from '../host/node_workspace_host.mjs';
+import { loadNodeAgentConfig } from '../host/node_agent_config.mjs';
 import { NodeFsHost } from '../host/node_fs_host.mjs';
 import { AgentSession, createSessionState } from './agent_session.mjs';
 import { AgentSessionStore } from './session_store.mjs';
 import { ModelGateway } from './model_gateway.mjs';
 import { createJevDecisionGateway } from '../decision/jev_gateway.mjs';
+import { createOperatorPool } from '../varina/operator_pool.mjs';
+
+function validateModelReferences(config) {
+  if (!Array.isArray(config?.models) || !config.models.length) throw new Error('注入的模型列表不能为空');
+  const ids = new Set();
+  for (const model of config.models) {
+    if (typeof model?.id !== 'string' || !model.id.trim() || ids.has(model.id)) throw new Error('注入的模型 ID 必须非空且唯一');
+    ids.add(model.id);
+  }
+  if (!ids.has(config.roles?.main)) throw new Error('main 必须引用注入列表中的模型');
+  for (const [role, modelId] of Object.entries(config.roles)) {
+    if (modelId != null && !ids.has(modelId)) throw new Error(`角色 ${role} 引用了未注入的模型：${modelId}`);
+  }
+  if (!Array.isArray(config.seats)) throw new Error('注入的 seats 必须是数组');
+  for (const seat of config.seats) {
+    if (!ids.has(seat?.modelId)) throw new Error(`席位 ${seat?.id} 引用了未注入的模型：${seat?.modelId}`);
+  }
+}
 
 export class AgentTurnConflictError extends Error {
   constructor(message = '这个会话已有一轮正在处理') {
@@ -19,16 +36,22 @@ export class AgentTurnConflictError extends Error {
 export class AgentService {
   constructor({
     root,
-    dataDir = path.join(root, '.varina/data/sessions'),
-    workspaceRoot = path.resolve(root, '..'),
-    store = new AgentSessionStore(dataDir),
-    configLoader = loadConfig,
+    dataDir,
+    workspaceRoot,
+    workspaceHost = new NodeWorkspaceHost(workspaceRoot ?? defaultWorkspaceRoot(root)),
+    env = {},
+    operatorPool,
+    store = new AgentSessionStore(dataDir ?? defaultSessionDataDir(root)),
+    configLoader = loadNodeAgentConfig,
     hostFactory = workspace => new NodeFsHost(workspace),
     gatewayFactory = (config, options) => new ModelGateway(config, options),
     decisionGatewayFactory = createJevDecisionGateway
   } = {}) {
     this.root = root;
-    this.workspaceRoot = path.resolve(workspaceRoot);
+    this.workspaceHost = workspaceHost;
+    this.workspaceRoot = workspaceHost.root;
+    this.env = env;
+    this.operatorPool = operatorPool === undefined ? undefined : createOperatorPool(operatorPool);
     this.store = store;
     this.configLoader = configLoader;
     this.hostFactory = hostFactory;
@@ -43,8 +66,8 @@ export class AgentService {
 
   async init() {
     if (this.initialized) return this;
-    this.workspaceRealRoot = await realpath(this.workspaceRoot);
-    if (!(await stat(this.workspaceRealRoot)).isDirectory()) throw new Error('允许的工作区根路径不是目录');
+    await this.workspaceHost.init();
+    this.workspaceRealRoot = this.workspaceHost.realRoot ?? this.workspaceHost.root;
     await this.store.init();
     const interruptedStatuses = new Set(['running', 'baseline_complete', 'evaluating_varina', 'running_varina']);
     for (const session of await this.store.list()) {
@@ -68,32 +91,12 @@ export class AgentService {
   }
 
   async resolveWorkspace(requested) {
-    const target = path.resolve(requested || this.workspaceRoot);
-    const relative = path.relative(this.workspaceRoot, target);
-    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('会话工作区必须位于允许的工作区根目录内');
-    const resolved = await realpath(target);
-    const realRelative = path.relative(this.workspaceRealRoot, resolved);
-    if (realRelative === '..' || realRelative.startsWith(`..${path.sep}`) || path.isAbsolute(realRelative)) throw new Error('目录通过符号链接越出了允许范围');
-    if (!(await stat(resolved)).isDirectory()) throw new Error('选择的工作区不是目录');
-    return resolved;
+    return this.workspaceHost.resolve(requested);
   }
 
   async browseDirectories(requested = null) {
     await this.init();
-    const current = await this.resolveWorkspace(requested || this.workspaceRealRoot);
-    const entries = await readdir(current, { withFileTypes: true });
-    const directories = [];
-    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-      const candidate = path.join(current, entry.name);
-      try {
-        const resolved = await this.resolveWorkspace(candidate);
-        directories.push({ name: entry.name, path: resolved, hidden: entry.name.startsWith('.') });
-      } catch { /* omit inaccessible and escaping links */ }
-    }
-    const parentCandidate = path.dirname(current);
-    const parent = current === this.workspaceRealRoot ? null : await this.resolveWorkspace(parentCandidate);
-    return { root: this.workspaceRealRoot, current, parent, directories };
+    return this.workspaceHost.browse(requested);
   }
 
   async create({ workspace_root, title, mode = 'live' } = {}) {
@@ -159,6 +162,31 @@ export class AgentService {
     return () => this.events.off(sessionId, listener);
   }
 
+  async #createAgentSession(state, { signal, onEvent, maxToolIterations }) {
+    const config = await this.configLoader(this.root, state.mode ?? 'live');
+    validateModelReferences(config);
+    const host = await this.hostFactory(state.workspace_root).init();
+    const gatewayOptions = {
+      mode: state.mode ?? 'live', signal,
+      onCall: call => {
+        state.calls.push(call);
+        onEvent({ event: 'model_call', session_id: state.session_id, phase: call.phase, status: call.status, model_id: call.model_id });
+      }
+    };
+    const gateway = this.gatewayFactory(config, gatewayOptions);
+    const decisionGateway = this.decisionGatewayFactory(config, gatewayOptions);
+    const resolvedMaxIterations = Number(maxToolIterations)
+      || Number(this.env.VARINA_MAX_TOOL_ITERATIONS)
+      || Number(this.env.AHA_MAX_TOOL_ITERATIONS)
+      || config?.max_tool_iterations
+      || config?.agent?.max_tool_iterations
+      || 100;
+    return new AgentSession({
+      state, host, store: this.store, gateway, decisionGateway, config, operatorPool: this.operatorPool,
+      signal, onEvent, env: this.env, maxToolIterations: resolvedMaxIterations
+    });
+  }
+
   async startTurn(sessionId, message, { enable_varina, enable_aha, max_tool_iterations } = {}) {
     await this.init();
     if (this.active.has(sessionId)) throw new AgentTurnConflictError();
@@ -168,39 +196,8 @@ export class AgentService {
     this.active.set(sessionId, slot);
     const publish = event => this.events.emit(sessionId, event);
     slot.completion = (async () => {
-      const rawConfig = await this.configLoader(this.root, state.mode ?? 'live');
-      const { config } = resolveActiveConfig(rawConfig, state.mode ?? 'live');
-      const host = await this.hostFactory(state.workspace_root).init();
-      const gateway = this.gatewayFactory(config, {
-        mode: state.mode ?? 'live', signal: controller.signal,
-        onCall: call => {
-          state.calls.push(call);
-          publish({ event: 'model_call', session_id: sessionId, phase: call.phase, status: call.status, model_id: call.model_id });
-        }
-      });
-      const decisionGateway = this.decisionGatewayFactory(config, {
-        mode: state.mode ?? 'live', signal: controller.signal,
-        onCall: call => {
-          state.calls.push(call);
-          publish({ event: 'model_call', session_id: sessionId, phase: call.phase, status: call.status, model_id: call.model_id });
-        }
-      });
-      const resolvedMaxIterations = Number(max_tool_iterations)
-        || Number(process.env.VARINA_MAX_TOOL_ITERATIONS)
-        || Number(process.env.AHA_MAX_TOOL_ITERATIONS)
-        || config?.max_tool_iterations
-        || config?.agent?.max_tool_iterations
-        || 100;
-      const agent = new AgentSession({
-        state,
-        host,
-        store: this.store,
-        gateway,
-        decisionGateway,
-        config,
-        signal: controller.signal,
-        onEvent: publish,
-        maxToolIterations: resolvedMaxIterations
+      const agent = await this.#createAgentSession(state, {
+        signal: controller.signal, onEvent: publish, maxToolIterations: max_tool_iterations
       });
       const enabled = enable_varina ?? enable_aha;
       return agent.turn(message, { enable_varina: enabled, enable_aha: enabled });
@@ -239,21 +236,11 @@ export class AgentService {
     const publish = event => this.events.emit(sessionId, event);
     slot.completion = (async () => {
       if (!accepted) {
-        const agent = new AgentSession({ state, store: this.store, onEvent: publish });
+        const agent = new AgentSession({ state, store: this.store, env: this.env, onEvent: publish });
         return agent.resolveVarinaConfirmation(confirmationId, false);
       }
-      const rawConfig = await this.configLoader(this.root, state.mode ?? 'live');
-      const { config } = resolveActiveConfig(rawConfig, state.mode ?? 'live');
-      const host = await this.hostFactory(state.workspace_root).init();
-      const gateway = this.gatewayFactory(config, {
-        mode: state.mode ?? 'live', signal: controller.signal,
-        onCall: call => {
-          state.calls.push(call);
-          publish({ event: 'model_call', session_id: sessionId, phase: call.phase, status: call.status, model_id: call.model_id });
-        }
-      });
-      const agent = new AgentSession({
-        state, host, store: this.store, gateway, config, signal: controller.signal, onEvent: publish
+      const agent = await this.#createAgentSession(state, {
+        signal: controller.signal, onEvent: publish
       });
       return agent.resolveVarinaConfirmation(confirmationId, accepted);
     })().catch(async error => {

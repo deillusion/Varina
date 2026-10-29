@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { AgentService } from './src/agent/agent_service.mjs';
+import { operators } from './src/operators.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 if (typeof process.loadEnvFile === 'function') {
@@ -18,7 +19,7 @@ const mode = process.argv.includes('--demo') || process.argv.includes('--mock') 
 const workspaceRoot = path.resolve(valueAfter('--workspace') || process.env.VARINA_WORKSPACE_ROOT || process.env.AHA_WORKSPACE_ROOT || path.resolve(root, '..'));
 const existingSessionId = valueAfter('--session');
 const initialPrompt = valueAfter('--prompt');
-const service = new AgentService({ root, workspaceRoot });
+const service = new AgentService({ env: process.env, root, workspaceRoot, operatorPool: operators });
 await service.init();
 
 let session;
