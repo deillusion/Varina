@@ -42,12 +42,12 @@ export const ALL_AGENT_TOOL_SPECS = Object.freeze([
     type: 'function',
     function: {
       name: 'Glob',
-      description: '按 glob 模式匹配文件路径列表',
+      description: '按工作区相对路径匹配文件，不区分大小写。只支持 *、**、?；不支持 {a,b}、[ab] 或 extglob，请拆成多次调用。默认跳过隐藏项及 .git/node_modules/dist/build/.varina/.aha。结果达到 max_results 时可能未搜全，请缩小范围；空列表不证明文件不存在。',
       parameters: {
         type: 'object',
         properties: {
-          pattern: { type: 'string', description: '匹配模式，如 **/*.md' },
-          max_results: { type: 'integer', description: '最多返回的结果数，默认 200' }
+          pattern: { type: 'string', minLength: 1, description: '工作区相对路径模式，仅支持 *、**、?，默认 **/*，如 src/**/*.mjs' },
+          max_results: { type: 'integer', minimum: 1, maximum: 500, description: '最多返回 1–500 个结果，默认 200；不会自动调整非法值' }
         },
         additionalProperties: false
       }
@@ -57,14 +57,14 @@ export const ALL_AGENT_TOOL_SPECS = Object.freeze([
     type: 'function',
     function: {
       name: 'Grep',
-      description: '在工作区文件中快速检索文本或正则表达式匹配',
+      description: '逐行检索工作区文本，不区分大小写，不跨行。沿用 Glob 的模式限制和排除规则，最多扫描 5000 个候选文件，跳过超过 2 MiB 或二进制文件。正则最长 200 字符，不支持数字反向引用、嵌套或连续无界重复量词。命中行超过 500 字符时返回截短预览及 truncated/line_chars；结果达到 max_results 时可能未搜全，空列表不证明内容不存在。',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: '检索词或正则表达式' },
-          is_regex: { type: 'boolean', description: '是否作为正则表达式处理' },
-          path_filter: { type: 'string', description: '文件过滤 glob，默认 **/*' },
-          max_results: { type: 'integer', description: '最多返回的结果数，默认 100' }
+          query: { type: 'string', minLength: 1, maxLength: 500, description: '普通检索词为 1–500 字符；is_regex=true 时正则最长 200 字符' },
+          is_regex: { type: 'boolean', description: '是否使用 JavaScript 正则，默认 false；检索均忽略大小写' },
+          path_filter: { type: 'string', minLength: 1, description: '工作区相对路径过滤，仅支持 *、**、?，默认 **/*' },
+          max_results: { type: 'integer', minimum: 1, maximum: 500, description: '最多返回 1–500 条命中，默认 100；不会自动调整非法值' }
         },
         required: ['query'],
         additionalProperties: false
@@ -75,14 +75,14 @@ export const ALL_AGENT_TOOL_SPECS = Object.freeze([
     type: 'function',
     function: {
       name: 'Edit',
-      description: '精确替换文件中的特定文本块。必须经由用户显式写意图确认',
+      description: '按字面文本替换文件中恰好出现一次的原文块，不解释 $& 等替换符。仅在用户当前消息明确要求修改文件时调用。先 Read 获取 contentHash 和无渲染行号的原文（换行使用 LF），再提供 expected_hash；版本变化须重新 Read。覆盖前自动备份，new_string="" 表示删除原文块。',
       parameters: {
         type: 'object',
         properties: {
-          file_path: { type: 'string', description: '文件相对路径' },
-          old_string: { type: 'string', description: '被替换的现有文本块' },
-          new_string: { type: 'string', description: '替换后的新文本块' },
-          expected_hash: { type: 'string', description: '操作前文件的 sha256' }
+          file_path: { type: 'string', minLength: 1, maxLength: 50000, description: '工作区相对路径，非空白，最多 50000 字符' },
+          old_string: { type: 'string', minLength: 1, maxLength: 50000, description: '从 Read 正文复制、恰好匹配一次的非空文本，允许纯空白，最多 50000 字符' },
+          new_string: { type: 'string', maxLength: 200000, description: '按字面写入的新文本，允许空字符串（删除）及纯空白，最多 200000 字符' },
+          expected_hash: { type: 'string', minLength: 1, maxLength: 50000, description: '最近一次 Read 返回的 contentHash，不是片段的哈希' }
         },
         required: ['file_path', 'old_string', 'new_string', 'expected_hash'],
         additionalProperties: false
@@ -93,15 +93,15 @@ export const ALL_AGENT_TOOL_SPECS = Object.freeze([
     type: 'function',
     function: {
       name: 'Write',
-      description: '写入或覆盖文件内容。必须经由用户显式写意图确认',
+      description: '写入完整文件内容。仅在用户当前消息明确要求写入文件时调用。三个参数全部必填：新建时 expected_hash=null，覆盖前先 Read 并复制 contentHash。必须显式提供 content，只有 content="" 才表示清空文件；缺失或 null 会拒绝。覆盖前自动备份，版本变化须重新 Read。',
       parameters: {
         type: 'object',
         properties: {
-          file_path: { type: 'string', description: '文件相对路径' },
-          content: { type: 'string', description: '完整文件内容' },
-          expected_hash: { type: ['string', 'null'], description: '覆盖前文件的预期 sha256，新建文件为 null' }
+          file_path: { type: 'string', minLength: 1, maxLength: 20000, description: '工作区相对路径，非空白，最多 20000 字符' },
+          content: { type: 'string', maxLength: 500000, description: '必填的完整文件内容，最多 500000 字符；允许空字符串以明确清空文件' },
+          expected_hash: { type: ['string', 'null'], minLength: 1, maxLength: 20000, description: '必填；覆盖时复制 Read 返回的 contentHash，新建时显式传 null' }
         },
-        required: ['file_path'],
+        required: ['file_path', 'content', 'expected_hash'],
         additionalProperties: false
       }
     }

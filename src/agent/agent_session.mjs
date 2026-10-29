@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { validateSearchArguments, validateWriteArguments, validateEditArguments } from '../tool_validation.mjs';
 import { VarinaGateController } from './gate.mjs';
 import {
   BASELINE_EXTRACTION_SYSTEM_PROMPT,
@@ -37,7 +38,7 @@ const VARINA_CONTINUATION_NOTE = `A runtime-triggered Vary call appears after th
 function cleanError(error) {
   const code = error?.code ?? 'TOOL_ERROR';
   const message = String(error?.message ?? error).replace(/[A-Z]:\\[^\s]+/gi, '[workspace path]').slice(0, 500);
-  return { code, message };
+  return { code, message, ...(error?.details ? { details: error.details } : {}) };
 }
 
 function parseArguments(call) {
@@ -998,19 +999,19 @@ export class AgentSession {
         upsertManifest(this.state, result);
         this.turnReadPaths?.add(result.filePath);
       } else if (call.name === 'Glob') {
+        validateSearchArguments('Glob', args);
         result = await this.host.listFiles(args.pattern ?? '**/*', { maxResults: args.max_results ?? 200, signal: this.signal });
       } else if (call.name === 'Grep') {
-        assertString(args.query, 'query', { max: 500 });
+        validateSearchArguments('Grep', args);
         result = await this.host.grep(args.query, { isRegex: args.is_regex === true, pathFilter: args.path_filter ?? '**/*', maxResults: args.max_results ?? 100, signal: this.signal });
       } else if (call.name === 'Edit') {
         if (!writeIntent(currentUserMessage)) throw new Error('用户本轮没有明确要求写入，Edit 已拒绝');
-        for (const key of ['file_path', 'old_string', 'new_string', 'expected_hash']) assertString(args[key], key, { max: key === 'new_string' ? 200000 : 50000 });
+        validateEditArguments(args);
         result = await this.host.editFile(args.file_path, args.old_string, args.new_string, { expectedHash: args.expected_hash, createBackup: true });
       } else if (call.name === 'Write') {
         if (!writeIntent(currentUserMessage)) throw new Error('用户本轮没有明确要求写入，Write 已拒绝');
-        assertString(args.file_path, 'file_path'); assertString(args.content, 'content', { optional: true, max: 500000 });
-        if (args.expected_hash !== null) assertString(args.expected_hash, 'expected_hash');
-        result = await this.host.writeFile(args.file_path, args.content ?? '', { expectedHash: args.expected_hash ?? null, createBackup: true });
+        validateWriteArguments(args);
+        result = await this.host.writeFile(args.file_path, args.content, { expectedHash: args.expected_hash, createBackup: true });
       } else if (call.name === 'InitProject') {
         const mode = initMode(currentUserMessage);
         if (!mode) throw new Error('InitProject 只允许在用户明确输入 /init 或 /init --refresh 时调用');
