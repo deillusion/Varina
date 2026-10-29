@@ -16,7 +16,7 @@ export const DEFAULT_MAX_RESULT_CHARS = 50_000;
 /** 工具可以声明更低的上限。Grep 对标 Claude Code 的 maxResultSizeChars: 20_000。 */
 export const MAX_RESULT_CHARS_BY_TOOL = {
   Grep: 20_000,
-  ExploreDesign: 150_000,
+  Vary: 150_000,
   Aha: 150_000
 };
 
@@ -89,7 +89,7 @@ export async function applyToolResultBudget(results, { persist, budget = MAX_TOO
     const text = JSON.stringify(item, null, 2);
     const stored = await persist(`${label}-${item.id ?? index}`, text);
     persisted.push({ id: item.id ?? null, name: item.name ?? null, path: stored.filePath, bytes: stored.bytes, chars: text.length });
-    const isReasoningTool = item.name === 'ExploreDesign' || item.name === 'Aha';
+    const isReasoningTool = item.name === 'Vary' || item.name === 'Aha';
     const note = isReasoningTool
       ? `${PERSISTED_OUTPUT_TAG} 结果过大（${text.length} 字符），完整内容已写入 persisted_path。`
       : `${PERSISTED_OUTPUT_TAG} 结果过大（${text.length} 字符），完整内容已写入 persisted_path。需要细节时用 Read 读取该文件，不要重跑同一个检索。`;

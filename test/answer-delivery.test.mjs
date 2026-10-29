@@ -1,17 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ExploreDesignEngine } from '../src/varina/explore_design.mjs';
+import { VaryEngine } from '../src/varina/vary.mjs';
+import { EXPLORATION_TOOLS } from '../src/varina/react.mjs';
+import { validateJsonSchema } from '../src/agent/schemas.mjs';
 import { MemoryHost } from '../src/host/node_fs_host.mjs';
 
-// Exercise both final-answer routes with real divergence, a pending verification
-// request and an unknown fact. The full backlog must survive without becoming
-// an automatically appended second answer.
-for (const delivery of ['Finish', 'direct']) {
-  test(`${delivery} preserves the chosen answer and keeps the investigation backlog in the handoff`, async () => {
+// Finish closes exploration without producing a user-facing answer. The main
+// Agent receives the structured board, fact ledger and unresolved dependencies.
+test('Finish closes exploration and preserves the investigation handoff', async () => {
     const criticalClaim = 'The benefit of switching has not been measured.';
     const peripheralClaim = 'Provider capacity metadata is unavailable.';
-    const modelQuestion = 'Which task boundary should the caller use?';
-    const answer = 'Keep the current model while it is making progress. Switch at a clear task boundary when the other model has a concrete advantage. That advantage has not yet been measured here, so treat this as a starting policy to validate.';
     let finalCheckpoint;
     let pointId;
     const config = {
@@ -58,8 +56,6 @@ for (const delivery of ['Finish', 'direct']) {
           }
         });
       }
-      // The model sees the pending claims and their latest fact update before
-      // writing either final answer, even though the handoff union is built later.
       const toolResults = request.messages.filter(message => message.role === 'tool')
         .map(message => JSON.parse(message.content));
       const divergence = toolResults.find(item => item.name === 'Diverge').result;
@@ -67,19 +63,13 @@ for (const delivery of ['Finish', 'direct']) {
       const updatedFact = toolResults.find(item => item.name === 'UpdateBoardItem').result.fact;
       assert.equal(updatedFact.claim, criticalClaim);
       assert.equal(updatedFact.status, 'unknown');
-      if (delivery === 'direct') return { message: answer, tool_calls: [] };
-      return call('Finish', {
-        answer,
-        solutions: [{
-          solution_id: 'S1', name: 'Keep continuity across a task',
-          core_mechanism_ids: [pointId], defensive_patch_ids: [],
-          inherent_costs: ['Can miss small gains from switching earlier.']
-        }],
-        // Include a duplicate to check that the audit union remains deduplicated.
-        unresolved_questions: [criticalClaim, modelQuestion]
-      });
+      const lastMessage = request.messages.at(-1);
+      if (lastMessage.role === 'user' && lastMessage.content.includes('必须调用无参数的 Finish()')) {
+        return call('Finish', {});
+      }
+      return { message: 'This text must not become the user-facing answer.', tool_calls: [] };
     } };
-    const engine = new ExploreDesignEngine({
+    const engine = new VaryEngine({
       host: new MemoryHost(), gateway, config,
       checkpoint: async runtime => { finalCheckpoint = structuredClone(runtime); }
     });
@@ -87,17 +77,25 @@ for (const delivery of ['Finish', 'direct']) {
 
     assert.equal(result.state, 'complete');
     assert.equal(result.rounds_executed, 1);
-    assert.equal(result.final_text, answer);
-    assert.equal(result.react.final_answer, answer);
+    assert.equal(Object.hasOwn(result, 'final_text'), false);
+    assert.equal(Object.hasOwn(result.react, 'final_answer'), false);
+    assert.equal(result.react.interventions.some(item => item.reason === 'FINISH_REQUIRED'), true);
     assert.equal(result.fact_ledger[0].status, 'unknown');
     assert.equal(result.fact_ledger[0].claim, criticalClaim);
     assert.equal(result.verification_requests.length, 2);
-    assert.deepEqual(new Set(result.unresolved_questions), new Set([
-      criticalClaim, peripheralClaim, ...(delivery === 'Finish' ? [modelQuestion] : [])
-    ]));
-    assert.equal(result.unresolved_questions.length, delivery === 'Finish' ? 3 : 2);
+    assert.deepEqual(new Set(result.unresolved_questions), new Set([criticalClaim, peripheralClaim]));
+    assert.equal(result.unresolved_questions.length, 2);
     assert.deepEqual(finalCheckpoint.handoff.unresolved_questions, result.unresolved_questions);
-    assert.equal(finalCheckpoint.handoff.final_text, answer);
-    if (delivery === 'Finish') assert.equal(result.solutions[0].core_mechanism_ids[0], pointId);
+    assert.equal(Object.hasOwn(finalCheckpoint.handoff, 'final_text'), false);
+    assert.deepEqual(result.solutions, []);
   });
-}
+
+test('Finish only accepts an empty payload', () => {
+  const finish = EXPLORATION_TOOLS.find(tool => tool.function.name === 'Finish');
+  assert.deepEqual(finish.function.parameters.required, []);
+  validateJsonSchema({}, finish.function.parameters);
+  assert.throws(
+    () => validateJsonSchema({ answer: 'user-facing answer' }, finish.function.parameters),
+    /\$\.answer 未定义/
+  );
+});

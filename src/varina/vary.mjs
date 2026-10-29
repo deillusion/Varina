@@ -302,19 +302,6 @@ function applyOperations(runtime, round, operations, candidates) {
   return { add, merge, drop, candidateToPoint };
 }
 
-function validateAssembly(result, board) {
-  const active = new Set(board.points.filter(point => point.status === 'active' && point.type !== 'subproblem').map(point => point.id));
-  const solutionIds = new Set();
-  if (result.solutions.length > 3) throw new Error('装配方案最多 3 个');
-  for (const solution of result.solutions) {
-    if (solutionIds.has(solution.solution_id)) throw new Error('solution_id 重复');
-    solutionIds.add(solution.solution_id);
-    const ids = [...solution.core_mechanism_ids, ...solution.defensive_patch_ids];
-    if (!solution.name.trim() || !solution.core_mechanism_ids.length || !solution.inherent_costs.length || ids.some(id => !active.has(id))) throw new Error('装配方案字段或 Point 引用无效');
-    if (new Set(ids).size !== ids.length) throw new Error('同一装配方案重复引用 Point');
-  }
-}
-
 async function loadInitialFiles(host, relevantFiles, degradations) {
   const loaded = [];
   for (const filePath of [...new Set(relevantFiles ?? [])].slice(0, 5)) {
@@ -624,7 +611,7 @@ function appendSubproblemElementsToBoard(runtime, elements, state) {
   return added;
 }
 
-export class ExploreDesignEngine {
+export class VaryEngine {
   constructor({ host, gateway, decisionGateway = null, config, signal, onEvent = () => {}, checkpoint = async () => {} }) {
     this.host = host;
     this.gateway = gateway;
@@ -1164,14 +1151,13 @@ export class ExploreDesignEngine {
     let solutions = [];
     let unresolvedQuestions = [];
     try {
-      if (!problem?.trim()) throw new Error('ExploreDesign problem 不能为空');
+      if (!problem?.trim()) throw new Error('Vary problem 不能为空');
       if (!seats.length) throw new Error('Varina 至少需要一个创意席位');
       await this.runDecomposition({ runtime, runId, loadedFiles });
       await this.runSubproblemExpansion({ runtime, runId });
       const react = new ExplorationReact({
         runtime, host: this.host, gateway: this.gateway, config: this.config,
         signal: this.signal, checkpoint: this.checkpoint, onEvent: this.onEvent,
-        validateAssembly,
         diverge: args => this.divergeRound({ runtime, runId, loadedFiles, rng, seats, focus: args.focus ?? '' }),
         refreshSources: async filePath => {
           if (!loadedFiles.some(file => file.filePath === filePath)) loadedFiles.push(await this.host.readFile(filePath, { signal: this.signal }));
@@ -1180,10 +1166,7 @@ export class ExploreDesignEngine {
           runtime.working_memory_files = loadedFiles.map(file => ({ file_path: file.filePath, content_hash: file.contentHash, snapshot_id: runtime.repository_snapshot_id }));
         }
       });
-      const final = await react.run();
-      solutions = final.solutions;
-      unresolvedQuestions = final.unresolved_questions;
-      runtime.final_text = final.final_text;
+      await react.run();
       stopReason = 'required_rounds_complete';
       runtime.status = 'complete';
     } catch (error) {
@@ -1195,11 +1178,8 @@ export class ExploreDesignEngine {
     const unresolvedClaims = runtime.verification_requests.filter(request => ['pending', 'unknown', 'stale'].includes(request.status));
     unresolvedQuestions = [...new Set([...unresolvedQuestions, ...unresolvedClaims.map(request => request.claim),
       ...runtime.fact_ledger.filter(fact => ['unknown', 'stale'].includes(fact.status)).map(fact => fact.claim)])];
-    // Keep the complete audit backlog in structured state. The answer already
-    // explains the uncertainty that matters to its recommendation in context.
     const handoff = {
       run_id: runId, terminal: true, state: runtime.status,
-      final_text: runtime.final_text ?? null,
       react: runtime.react ?? null,
       board_changes: runtime.board_changes,
       verification_requests: runtime.verification_requests,

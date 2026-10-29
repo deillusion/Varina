@@ -4,7 +4,6 @@ import {
   BASELINE_EXTRACTION_SYSTEM_PROMPT,
   INIT_PROJECT_SYSTEM_PROMPT,
   MAIN_AGENT_SYSTEM_PROMPT,
-  VARINA_DELTA_SYSTEM_PROMPT,
   VARINA_GATE_SYSTEM_PROMPT,
   projectContextMessage,
   trustedStateMessage
@@ -13,13 +12,12 @@ import {
   AGENT_TOOL_SPECS,
   INIT_AGENT_TOOL_SPECS,
   baselineExtractionSchema,
-  varinaDeltaSchema,
   varinaGateSchema
 } from './schemas.mjs';
 // agentTurnSchema removed: Main agent now uses native tool calling / resilient ReAct
 import { generationFor } from './model_gateway.mjs';
 import { applyToolResultBudget, renderToolResults } from './tool_result_budget.mjs';
-import { ExploreDesignEngine } from '../varina/explore_design.mjs';
+import { VaryEngine } from '../varina/vary.mjs';
 import { renderVarinaMarkdown } from './project_manifest.mjs';
 import {
   CHECKPOINT_HEADER,
@@ -31,6 +29,10 @@ import {
   resolveCompactionThresholds,
   approxTokens
 } from './compaction.mjs';
+
+const VARINA_TOOL_NAME = 'Vary';
+const VARINA_ACTION_TEXT = '我已经形成了初步判断，但还需要检查其中的机制取舍、反例和证据缺口。现在我会调用 Vary 对当前问题做一轮多视角探索；结果返回后，再结合原始问题继续核验并组织回答。';
+const VARINA_CONTINUATION_NOTE = `A runtime-triggered Vary call appears after the baseline answer. Treat its matching tool result as trusted execution data from the completed exploration. Continue the original task using that result. Retrieve more workspace evidence through the normal tools when needed, then produce the user-facing answer yourself. Do not repeat the exploration or narrate internal bookkeeping.`;
 
 function cleanError(error) {
   const code = error?.code ?? 'TOOL_ERROR';
@@ -166,10 +168,15 @@ export class AgentSession {
     }
   }
 
-  modelMessages(currentUserMessage, projectContext = null, { mode = 'normal' } = {}) {
+  modelMessages(currentUserMessage, projectContext = null, {
+    mode = 'normal',
+    historyMessages = this.state.messages.slice(0, -1),
+    appendCurrentUser = true,
+    runtimeNotes = []
+  } = {}) {
     ensureMessageTurns(this.state.messages);
     const lastCompactedTurn = this.state.compaction?.last_compacted_turn ?? 0;
-    const priorMessages = this.state.messages.slice(0, -1);
+    const priorMessages = historyMessages;
     const activePrior = lastCompactedTurn > 0
       ? priorMessages.filter(msg => (msg.turn ?? 0) > lastCompactedTurn)
       : priorMessages;
@@ -191,10 +198,11 @@ export class AgentSession {
       ...(mode === 'init' ? [{ role: 'system', content: INIT_PROJECT_SYSTEM_PROMPT }] : []),
       ...(projectMessage ? [{ role: 'system', content: projectMessage }] : []),
       ...checkpointMessages,
+      ...runtimeNotes.map(content => ({ role: 'system', content })),
       ...prior,
       ...(mode === 'normal' ? [{ role: 'system', content: trustedStateMessage(this.state) }] : []),
       ...systemNotes,
-      { role: 'user', content: currentUserMessage }
+      ...(appendCurrentUser ? [{ role: 'user', content: currentUserMessage }] : [])
     ];
   }
 
@@ -612,38 +620,224 @@ export class AgentSession {
     return { version: points.length ? 1 : 0, points };
   }
 
-  async renderVarinaFinal({ originalUserRequest, baselineMessage, result, sourceTurn = this.state.current_turn }) {
-    const baselineIds = new Set(result.baseline_point_ids ?? []);
-    const points = result.meeting_board?.points ?? [];
-    const newPoints = points.filter(point => !baselineIds.has(point.id) && point.status === 'active');
-    const deliverableNewPoints = newPoints.filter(point => point.type !== 'subproblem');
-    const revisedPoints = points.filter(point => baselineIds.has(point.id) && (point.revision ?? 1) > 1 && point.status === 'active' && point.type !== 'subproblem');
-    const changedIds = new Set([...deliverableNewPoints, ...revisedPoints].map(point => point.id));
-    const solutions = (result.solutions ?? []).filter(solution =>
-      [...solution.core_mechanism_ids, ...solution.defensive_patch_ids].some(id => changedIds.has(id))
-    );
-    const rendered = await this.gateway.invoke({
-      phase: 'varina_delta',
-      modelId: this.config.roles.varina_delta ?? this.config.roles.main,
-      messages: [
-        { role: 'system', content: VARINA_DELTA_SYSTEM_PROMPT },
-        { role: 'user', content: JSON.stringify({
-          original_user_request: originalUserRequest,
-          baseline_answer: baselineMessage.content,
-          final_active_points: points.filter(point => point.status === 'active' && point.type !== 'subproblem'),
-          new_points: deliverableNewPoints,
-          revised_points: revisedPoints,
-          rejected_directions: result.rejected_directions ?? [],
-          solutions,
-          unresolved_questions: result.unresolved_questions ?? []
-        }) }
-      ],
-      schema: varinaDeltaSchema,
-      generation: generationFor(this.config, 'varina_delta'),
-      context: { final_active_points: points, new_points: deliverableNewPoints, revised_points: revisedPoints, solutions },
-      logicalId: `${this.state.session_id}:T${sourceTurn}:varina-delta`
+  buildVarinaToolExchange({ baselineMessage, toolResult, exploreArgs }) {
+    const callId = `call-varina-${toolResult.run_id}`;
+    const baseline = String(baselineMessage.content ?? '').trim();
+    const toolArguments = {
+      problem: exploreArgs.problem,
+      user_constraints: exploreArgs.user_constraints ?? [],
+      source_excerpts: exploreArgs.source_excerpts ?? [],
+      agent_hypotheses: exploreArgs.agent_hypotheses ?? [],
+      relevant_files: exploreArgs.relevant_files ?? []
+    };
+    const ok = toolResult.state === 'complete';
+    const result = { id: callId, name: VARINA_TOOL_NAME, ok, result: toolResult };
+    if (!ok) {
+      result.error = {
+        code: toolResult.stop_reason ?? 'VARINA_INCOMPLETE',
+        message: toolResult.degradations?.at(-1) ?? 'Varina exploration did not complete.'
+      };
+    }
+    return {
+      callId,
+      assistant: {
+        role: 'assistant',
+        content: [baseline, VARINA_ACTION_TEXT].filter(Boolean).join('\n\n'),
+        tool_calls: [{
+          id: callId,
+          type: 'function',
+          function: { name: VARINA_TOOL_NAME, arguments: JSON.stringify(toolArguments) }
+        }]
+      },
+      tool: { role: 'tool', tool_call_id: callId, content: JSON.stringify(result) }
+    };
+  }
+
+  async continueAfterVarina({ originalUserRequest, baselineMessage, toolResult, exploreArgs, sourceTurn }) {
+    const baselineIndex = this.state.messages.findIndex(message => message.id === baselineMessage.id);
+    const historyMessages = this.state.messages.slice(0, baselineIndex >= 0 ? baselineIndex : -1);
+    const messages = this.modelMessages(null, this.turnProjectContext, {
+      mode: 'normal',
+      historyMessages,
+      appendCurrentUser: false,
+      runtimeNotes: [VARINA_CONTINUATION_NOTE]
     });
-    return rendered.text.trim();
+    const exchange = this.buildVarinaToolExchange({ baselineMessage, toolResult, exploreArgs });
+    messages.push(exchange.assistant, exchange.tool);
+    this.state.status = 'running';
+    this.state.active_turn = { turn: sourceTurn, steps: [] };
+    const seenCallIds = new Set([exchange.callId]);
+    let finalMessage = '';
+    let partial = false;
+
+    for (let iteration = 1; iteration <= this.maxToolIterations; iteration++) {
+      this.signal?.throwIfAborted();
+      const thinkStart = Date.now();
+      const thinkingStep = {
+        id: `step-think-${sourceTurn}-varina-${iteration}`,
+        type: 'thinking',
+        iteration,
+        phase: 'varina_continuation',
+        status: 'running',
+        title: `综合探索结果 · 第 ${iteration} 轮`,
+        content: '',
+        started_at: thinkStart
+      };
+      this.state.active_turn.steps.push(thinkingStep);
+      await this.save();
+      this.onEvent({
+        event: 'agent_thinking',
+        session_id: this.state.session_id,
+        turn: sourceTurn,
+        iteration,
+        phase: 'varina_continuation',
+        step_id: thinkingStep.id,
+        status: 'running',
+        content: ''
+      });
+      const output = await this.gateway.invoke({
+        phase: 'agent_turn',
+        modelId: this.config.roles.main,
+        messages,
+        generation: generationFor(this.config, 'agent_turn'),
+        context: { turn: sourceTurn, iteration, agent_mode: 'normal', phase: 'varina_continuation', varina_run_id: toolResult.run_id },
+        tools: AGENT_TOOL_SPECS,
+        logicalId: `${this.state.session_id}:T${sourceTurn}:V${iteration}`
+      });
+      thinkingStep.status = 'completed';
+      thinkingStep.completed_at = Date.now();
+      thinkingStep.duration_ms = thinkingStep.completed_at - thinkStart;
+      thinkingStep.content = output.thought || (output.tool_calls?.length ? output.message : '') || '';
+      await this.save();
+      this.onEvent({
+        event: 'agent_thinking',
+        session_id: this.state.session_id,
+        turn: sourceTurn,
+        iteration,
+        phase: 'varina_continuation',
+        step_id: thinkingStep.id,
+        status: 'completed',
+        content: thinkingStep.content,
+        duration_ms: thinkingStep.duration_ms
+      });
+      const toolCalls = Array.isArray(output.tool_calls) ? output.tool_calls : [];
+      if (!toolCalls.length) {
+        finalMessage = (output.message ?? '').trim() || (output.thought ?? '').trim() || '（已完成思考与回复）';
+        break;
+      }
+      for (let index = 0; index < toolCalls.length; index++) {
+        const call = toolCalls[index];
+        if (!call.id || typeof call.id !== 'string' || !call.id.trim()) {
+          call.id = `varina_continuation_${iteration}_${index + 1}`;
+        }
+        if (seenCallIds.has(call.id)) {
+          let candidate = `${call.id}_${iteration}`;
+          let suffix = 2;
+          while (seenCallIds.has(candidate)) candidate = `${call.id}_${iteration}_${suffix++}`;
+          call.id = candidate;
+        }
+        seenCallIds.add(call.id);
+        if (output.raw_tool_calls?.[index]) output.raw_tool_calls[index].id = call.id;
+      }
+      const results = [];
+      for (const call of toolCalls) {
+        let parsedArgs = null;
+        try { parsedArgs = JSON.parse(call.arguments_json); } catch {}
+        const toolStep = {
+          id: call.id,
+          type: 'tool',
+          name: call.name,
+          input: parsedArgs,
+          arguments_json: call.arguments_json,
+          status: 'running',
+          iteration,
+          phase: 'varina_continuation'
+        };
+        this.state.active_turn.steps.push(toolStep);
+        await this.save();
+        const result = await this.executeTool(call, originalUserRequest);
+        toolStep.status = result.ok ? 'completed' : 'failed';
+        toolStep.ok = result.ok;
+        toolStep.result = result.result;
+        toolStep.error = result.error;
+        await this.save();
+        results.push({ id: call.id, name: call.name, ...result });
+      }
+      const budgeted = await applyToolResultBudget(results, {
+        label: `T${sourceTurn}-V${iteration}`,
+        persist: (label, text) => this.host.persistToolResult(`${this.state.session_id}-${label}`, text)
+      });
+      if (budgeted.persisted.length) {
+        this.onEvent({
+          event: 'tool_results_persisted',
+          session_id: this.state.session_id,
+          turn: sourceTurn,
+          iteration,
+          persisted: budgeted.persisted
+        });
+        for (const item of budgeted.results) {
+          if (!item.persisted) continue;
+          const step = this.state.active_turn?.steps?.find(entry => entry.id === item.id);
+          if (!step) continue;
+          step.persisted = true;
+          step.persisted_path = item.persisted_path;
+          step.result = { persisted: true, persisted_path: item.persisted_path, preview: item.preview };
+        }
+      }
+      if (output.raw_tool_calls?.length) {
+        messages.push({
+          role: 'assistant',
+          content: output.message || null,
+          ...(output.raw_native_parts ? { native_parts: output.raw_native_parts } : {}),
+          tool_calls: output.raw_tool_calls
+        });
+        for (const item of budgeted.results) {
+          messages.push({ role: 'tool', tool_call_id: item.id, content: JSON.stringify(item) });
+        }
+      } else {
+        messages.push({ role: 'assistant', content: JSON.stringify(output) });
+        messages.push({ role: 'user', content: renderToolResults(budgeted.results) });
+      }
+      const thresholds = resolveCompactionThresholds(this.config);
+      const midResult = compactWorkingMessages(messages, {
+        midTurnThreshold: thresholds.midTurnChars,
+        currentIteration: iteration
+      });
+      if (midResult.compacted) {
+        this.onEvent({
+          event: 'context_compacted',
+          session_id: this.state.session_id,
+          turn: sourceTurn,
+          iteration,
+          phase: 'varina_continuation',
+          chars_before: midResult.charsBefore,
+          chars_after: midResult.charsAfter,
+          tokens_before: approxTokens(midResult.charsBefore),
+          tokens_after: approxTokens(midResult.charsAfter),
+          folded_count: midResult.foldedCount
+        });
+      }
+      await this.save();
+    }
+
+    if (!finalMessage) {
+      partial = true;
+      finalMessage = `Varina 探索已完成，但主 Agent 在 ${this.maxToolIterations} 次续轮内尚未完成回答。探索观点、事实和证据已经保留，可以继续提问。`;
+    }
+    const steps = this.state.active_turn?.steps ? [...this.state.active_turn.steps] : [];
+    delete this.state.active_turn;
+    return {
+      finalMessage,
+      partial,
+      steps,
+      messages,
+      context_exchange: {
+        synthetic: true,
+        name: VARINA_TOOL_NAME,
+        tool_call_id: exchange.callId,
+        run_id: toolResult.run_id
+      }
+    };
   }
 
   async runPostReact({ originalUserRequest, baselineMessage, forced = false, sourceTurn = this.state.current_turn }) {
@@ -687,35 +881,47 @@ export class AgentSession {
     this.onEvent({ event: 'varina_progress', session_id: this.state.session_id, turn: sourceTurn, stage: 'preparing' });
     const extraction = await this.extractBaseline(originalUserRequest, baselineMessage.content, sourceTurn);
     const initialBoard = this.initialBoardFromExtraction(extraction, baselineMessage.id);
-    const result = await this.explore({
+    const exploreArgs = {
       problem: extraction.task_framing || originalUserRequest,
       user_constraints: extraction.user_constraints,
       source_excerpts: [],
       agent_hypotheses: extraction.agent_hypotheses,
       relevant_files: [...(this.turnReadPaths ?? [])].filter(file => file !== 'VARINA.md')
-    }, originalUserRequest, {
+    };
+    const result = await this.explore(exploreArgs, originalUserRequest, {
       initialBoard,
       baselineSolutions: extraction.solutions,
       baselineMessageId: baselineMessage.id,
       triggerMode: forced ? 'user_confirmed_post_react' : gate.trigger_mode,
       turnInvoked: sourceTurn
     });
-    const content = result.final_text || (result.state !== 'complete'
-      ? `Varina 探索未完成：${result.degradations?.at(-1) ?? result.stop_reason}。已保留观点板和事实账本，可查看已产生的结果。`
-      : await this.renderVarinaFinal({ originalUserRequest, baselineMessage, result, sourceTurn }));
+    const continuation = await this.continueAfterVarina({
+      originalUserRequest,
+      baselineMessage,
+      toolResult: result,
+      exploreArgs,
+      sourceTurn
+    });
     const addendum = {
       id: `msg-${randomUUID().slice(0, 8)}`,
       role: 'assistant',
-      content,
+      content: continuation.finalMessage,
       created_at: new Date().toISOString(),
-      partial: result.state !== 'complete',
-      steps: [],
+      partial: result.state !== 'complete' || continuation.partial,
+      steps: continuation.steps,
       turn: sourceTurn,
       message_kind: 'varina_addendum',
       varina_run_id: result.run_id,
       aha_run_id: result.run_id,
-      baseline_message_id: baselineMessage.id
+      baseline_message_id: baselineMessage.id,
+      context_exchange: continuation.context_exchange
     };
+    const completedRun = (this.state.varina_runs ?? []).find(run => run.run_id === result.run_id);
+    if (completedRun) {
+      completedRun.final_text = continuation.finalMessage;
+      completedRun.context_exchange = continuation.context_exchange;
+    }
+    delete this.state.active_varina_progress;
     return { addendum, result };
   }
 
@@ -832,7 +1038,7 @@ export class AgentSession {
         result = await this.host.restoreBackup(args.backup_id);
       } else if (call.name === 'ListBackups') {
         result = await this.host.listBackups(args.file_path ?? null);
-      } else if (call.name === 'ExploreDesign') {
+      } else if (call.name === 'Vary') {
         result = await this.explore(args, currentUserMessage);
       } else throw new Error(`未知工具：${call.name}`);
       this.onEvent({
@@ -905,7 +1111,7 @@ export class AgentSession {
     if (!this.state.aha_runs) this.state.aha_runs = this.state.varina_runs;
     else if (this.state.aha_runs !== this.state.varina_runs) this.state.aha_runs.push(runRecord);
     await this.save();
-    const engine = new ExploreDesignEngine({
+    const engine = new VaryEngine({
       host: this.host, gateway: this.gateway, decisionGateway: this.decisionGateway, config: this.config, signal: this.signal,
       onEvent: this.onEvent,
       checkpoint: async runtime => {
@@ -970,18 +1176,31 @@ export class AgentSession {
     const cleanPoints = (handoff.meeting_board?.points ?? []).map(point => {
       const item = {
         id: point.id,
+        revision: point.revision ?? 1,
         type: point.type,
         status: point.status,
         text: point.text,
-        failure_condition: point.failure_condition
+        failure_condition: point.failure_condition,
+        verification_status: point.verification_status ?? 'unknown'
       };
       if (point.evidence_refs?.length) item.evidence_refs = point.evidence_refs;
       if (point.parent_subproblem_id) item.parent_subproblem_id = point.parent_subproblem_id;
       if (point.source) item.source = point.source;
       return item;
     });
+    const cleanFacts = (handoff.fact_ledger ?? []).map(fact => {
+      const { revisions, ...current } = fact;
+      return current;
+    });
+    const cleanChanges = (handoff.board_changes ?? []).map(change => ({
+      action: change.action,
+      reason: change.reason,
+      item_id: change.after?.id ?? change.before?.id ?? null,
+      revision: change.after?.revision ?? change.before?.revision ?? null,
+      fact_id: change.fact_id ?? null
+    }));
     const toolResult = {
-      final_text: handoff.final_text ?? null,
+      kind: 'varina_exploration_result',
       run_id: handoff.run_id,
       terminal: handoff.terminal,
       state: handoff.state,
@@ -992,13 +1211,16 @@ export class AgentSession {
         version: handoff.meeting_board?.version,
         points: cleanPoints
       },
-      fact_ledger: handoff.fact_ledger ?? [],
+      fact_ledger: cleanFacts,
+      board_changes: cleanChanges,
       solutions: handoff.solutions ?? [],
+      baseline_solutions: handoff.baseline_solutions ?? [],
       rejected_directions: handoff.rejected_directions ?? [],
       unresolved_questions: handoff.unresolved_questions ?? [],
       degradations: handoff.degradations ?? [],
       repository_snapshot_id: handoff.repository_snapshot_id,
       baseline_point_ids: handoff.baseline_point_ids ?? [],
+      loaded_files_manifest: handoff.loaded_files_manifest ?? [],
       decomposition: handoff.decomposition ?? null,
       subproblem_expansion: handoff.subproblem_expansion ?? null
     };

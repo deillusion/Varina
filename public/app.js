@@ -375,14 +375,14 @@ function findExploreStepForRun(runId) {
   const messages = state.session.messages ?? [];
   for (const msg of messages) {
     if (msg.varina_run_id === runId || msg.aha_run_id === runId) {
-      const step = msg.steps?.find(s => s.name === 'ExploreDesign');
+      const step = msg.steps?.find(s => s.name === 'Vary');
       if (step) return step;
     }
-    const step = msg.steps?.find(s => s.name === 'ExploreDesign' && (s.result?.run_id === runId || s.id === runId));
+    const step = msg.steps?.find(s => s.name === 'Vary' && (s.result?.run_id === runId || s.id === runId));
     if (step) return step;
   }
   const activeSteps = state.session.active_turn?.steps ?? [];
-  const activeStep = activeSteps.find(s => s.name === 'ExploreDesign' && (s.id === runId || s.result?.run_id === runId));
+  const activeStep = activeSteps.find(s => s.name === 'Vary' && (s.id === runId || s.result?.run_id === runId));
   if (activeStep) return activeStep;
   return null;
 }
@@ -980,7 +980,7 @@ function getToolBadge(toolName = '') {
   if (lower === 'write') return { badgeClass: 'tool-badge-write', badgeText: 'WRITE' };
   if (lower === 'initproject') return { badgeClass: 'tool-badge-write', badgeText: 'VARINA INIT' };
   if (lower === 'grep' || lower === 'glob') return { badgeClass: 'tool-badge-search', badgeText: 'SEARCH' };
-  if (lower === 'exploredesign') return { badgeClass: 'tool-badge-explore', badgeText: 'VARINA EXPLORE' };
+  if (lower === 'vary') return { badgeClass: 'tool-badge-explore', badgeText: 'VARY' };
   if (lower.includes('backup')) return { badgeClass: 'tool-badge-backup', badgeText: 'BACKUP' };
   return { badgeClass: 'tool-badge-generic', badgeText: 'TOOL' };
 }
@@ -1103,7 +1103,7 @@ function renderToolStep(step, openDetails = new Set()) {
   else if (toolName === 'Write') titleDetail = input.file_path || '';
   else if (toolName === 'Grep') titleDetail = input.query ? `"${input.query}"` : '';
   else if (toolName === 'Glob') titleDetail = input.pattern || '';
-  else if (toolName === 'ExploreDesign') titleDetail = input.problem?.slice(0, 36) || '';
+  else if (toolName === 'Vary') titleDetail = input.problem?.slice(0, 36) || '';
   else if (toolName === 'RestoreBackup') titleDetail = input.backup_id || '';
   else if (toolName === 'ListBackups') titleDetail = input.file_path || '工作区';
 
@@ -1154,7 +1154,7 @@ function renderToolStep(step, openDetails = new Set()) {
       <div class="tool-detail-row">文件模式：<code>${escapeHtml(input.pattern || '**/*')}</code></div>
       ${step.status === 'completed' ? `<div class="tool-result-meta">匹配到 ${files.length} 个文件</div>` : ''}
     `;
-  } else if (toolName === 'ExploreDesign') {
+  } else if (toolName === 'Vary') {
     bodyContent = `
       <div class="tool-detail-row"><strong>设计困境：</strong>${escapeHtml(input.problem || '')}</div>
       ${(input.constraints || []).length ? `<div class="tool-constraints"><strong>约束：</strong>${input.constraints.map(c => `<code>${escapeHtml(c)}</code>`).join(' ')}</div>` : ''}
@@ -1187,7 +1187,7 @@ function renderToolStep(step, openDetails = new Set()) {
 function renderVarinaProgress(progress) {
   if (!progress) return '';
   const isGate = progress.stage === 'gate';
-  const title = isGate ? '正在判断是否需要启动 Varina' : '正在准备 ExploreDesign';
+  const title = isGate ? '正在判断是否需要启动 Vary' : '正在准备 Vary';
   const detail = isGate
     ? '常规回答已完成，正在评估是否需要继续展开多视角推演。'
     : '正在整理常规回答，随后进入子问题拆解与逐题回答。';
@@ -1398,7 +1398,7 @@ function connectEvents(sessionId) {
         if (data.input !== undefined) step.input = data.input;
         step.status = 'running';
       }
-      if (data.name === 'ExploreDesign' && !(state.session.active_varina_runtime || state.session.active_aha_runtime)) {
+      if (data.name === 'Vary' && !(state.session.active_varina_runtime || state.session.active_aha_runtime)) {
         const runtime = {
           run_id: data.tool_call_id || `varina-${Date.now()}`,
           problem: data.input?.problem || '正在启动 Varina 深度多视角探索…',
@@ -2193,10 +2193,9 @@ function renderModelsTabContent(c, models, currentMain) {
 
 function renderVaryTabContent(c, models, currentMain) {
   const roleNames = [
-    ['exploration', '深度探索', '读取资料、发散和核查观点，并形成候选方案'],
+    ['exploration', '深度探索', '读取资料、发散和核查观点，结束后把结构化结果交回主 Agent'],
     ['varina_gate', '探索启动判断', '未使用 Jev 时判断请求是否需要探索确认'],
     ['baseline_extraction', '回答提取', '将常规回答整理为探索的初始观点'],
-    ['varina_delta', '终稿整合', '综合常规回答与探索结果，重新回答原始问题'],
     ['compaction', '上下文整理', '在对话过长时整理并保留必要背景']
   ];
 

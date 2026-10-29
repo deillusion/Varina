@@ -32,7 +32,7 @@ function sendNotification(method, params) {
 
 const VARINA_CHAT_TOOL = {
   name: 'varina_chat',
-  description: `与 Varina-Grounded 创作 Agent 对话。Agent 会按需读取工作区资料；普通创作和局部修改保持低延迟，复杂机制/架构开放题才启动 ExploreDesign。传回 session_id 可继续同一会话、复用观点板与事实账本。写文件必须在 message 中明确提出。`,
+  description: `与 Varina-Grounded 创作 Agent 对话。Agent 会按需读取工作区资料；普通创作和局部修改保持低延迟，复杂机制/架构开放题才启动 Vary。传回 session_id 可继续同一会话、复用观点板与事实账本。写文件必须在 message 中明确提出。`,
   inputSchema: {
     type: 'object',
     properties: {

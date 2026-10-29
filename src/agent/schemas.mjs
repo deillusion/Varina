@@ -153,7 +153,7 @@ export const ALL_AGENT_TOOL_SPECS = Object.freeze([
   {
     type: 'function',
     function: {
-      name: 'ExploreDesign',
+      name: 'Vary',
       description: '触发 Varina 深度设计探索流水线，推演多视角机制组合与系统取舍',
       parameters: {
         type: 'object',
@@ -208,7 +208,7 @@ const selectTools = names => Object.freeze(ALL_AGENT_TOOL_SPECS.filter(spec => n
 
 export const AGENT_TOOL_SPECS = selectTools(AGENT_TOOL_NAMES);
 export const INIT_AGENT_TOOL_SPECS = selectTools(INIT_AGENT_TOOL_NAMES);
-export const EXPLORE_DESIGN_TOOL_SPEC = ALL_AGENT_TOOL_SPECS.find(spec => spec.function.name === 'ExploreDesign');
+export const VARY_TOOL_SPEC = ALL_AGENT_TOOL_SPECS.find(spec => spec.function.name === 'Vary');
 
 export const agentTurnSchema = object({
   message: string,
